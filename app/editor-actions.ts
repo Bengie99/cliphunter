@@ -7,6 +7,7 @@ import { z } from "zod";
 import * as z4 from "zod/v4";
 import { getDataMode } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getWorkspaceId } from "@/lib/supabase/workspace";
 import type { EditSpec } from "@/remotion/spec";
 import type { ActionResult } from "./actions";
 
@@ -17,7 +18,8 @@ async function requireUser() {
     data: { user },
   } = await sb.auth.getUser();
   if (!user) throw new Error("You're signed out. Sign in again.");
-  return { sb, user };
+  // shared team rows are stored under the workspace id, not the user's own id
+  return { sb, workspaceId: await getWorkspaceId(sb) };
 }
 
 const fail = (err: unknown): { ok: false; error: string } => {
@@ -58,10 +60,10 @@ const specSchema = z.object({
   }),
 });
 
-async function upsertEdit(sb: ReturnType<typeof createSupabaseServerClient>, userId: string, clipId: string, fields: Record<string, unknown>) {
+async function upsertEdit(sb: ReturnType<typeof createSupabaseServerClient>, workspaceId: string, clipId: string, fields: Record<string, unknown>) {
   const { error } = await sb
     .from("clip_edits")
-    .upsert({ owner_id: userId, clip_id: clipId, ...fields }, { onConflict: "owner_id,clip_id" });
+    .upsert({ owner_id: workspaceId, clip_id: clipId, ...fields }, { onConflict: "owner_id,clip_id" });
   if (error) throw new Error(`Saving the edit failed: ${error.message}`);
 }
 
@@ -75,8 +77,8 @@ export async function saveEditAction(clipId: string, spec: EditSpec): Promise<Ac
   if (!id.success) return { ok: false, error: "Invalid clip" };
   if (!p.success) return { ok: false, error: `Invalid edit: ${p.error.issues[0]?.path.join(".")} ${p.error.issues[0]?.message}` };
   try {
-    const { sb, user } = await requireUser();
-    await upsertEdit(sb, user.id, id.data, { spec: p.data });
+    const { sb, workspaceId } = await requireUser();
+    await upsertEdit(sb, workspaceId, id.data, { spec: p.data });
     return { ok: true, data: undefined };
   } catch (err) {
     return fail(err);
@@ -86,8 +88,8 @@ export async function saveEditAction(clipId: string, spec: EditSpec): Promise<Ac
 export async function queueTranscriptionAction(clipId: string): Promise<ActionResult> {
   if (!uuid.safeParse(clipId).success) return { ok: false, error: "Invalid clip" };
   try {
-    const { sb, user } = await requireUser();
-    await upsertEdit(sb, user.id, clipId, { transcript_status: "queued", transcript_error: null });
+    const { sb, workspaceId } = await requireUser();
+    await upsertEdit(sb, workspaceId, clipId, { transcript_status: "queued", transcript_error: null });
     revalidatePath(`/editor/${clipId}`);
     return { ok: true, data: undefined };
   } catch (err) {
@@ -100,8 +102,8 @@ export async function queueRenderAction(clipId: string, spec: EditSpec): Promise
   if (!uuid.safeParse(clipId).success) return { ok: false, error: "Invalid clip" };
   if (!p.success) return { ok: false, error: `Invalid edit: ${p.error.issues[0]?.path.join(".")} ${p.error.issues[0]?.message}` };
   try {
-    const { sb, user } = await requireUser();
-    await upsertEdit(sb, user.id, clipId, {
+    const { sb, workspaceId } = await requireUser();
+    await upsertEdit(sb, workspaceId, clipId, {
       spec: p.data,
       render_status: "queued",
       render_progress: 0,
@@ -125,8 +127,8 @@ export async function registerAudioAssetAction(input: { kind: "music" | "sfx"; n
     .safeParse(input);
   if (!p.success) return { ok: false, error: "Invalid audio file" };
   try {
-    const { sb, user } = await requireUser();
-    if (!p.data.storagePath.startsWith(`${user.id}/audio/`)) return { ok: false, error: "Invalid storage path" };
+    const { sb, workspaceId } = await requireUser();
+    if (!p.data.storagePath.startsWith(`${workspaceId}/audio/`)) return { ok: false, error: "Invalid storage path" };
     const { data, error } = await sb
       .from("audio_assets")
       .insert({ kind: p.data.kind, name: p.data.name, storage_path: p.data.storagePath })
@@ -177,7 +179,7 @@ export async function generateMetadataAction(clipId: string): Promise<ActionResu
     return { ok: false, error: "Add ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables, then redeploy." };
   }
   try {
-    const { sb, user } = await requireUser();
+    const { sb, workspaceId } = await requireUser();
     const [{ data: clip, error: clipErr }, { data: edit }] = await Promise.all([
       sb.from("clips").select("title, creator_name, creator_url, platform, category, original_url").eq("id", clipId).single(),
       sb.from("clip_edits").select("spec").eq("clip_id", clipId).maybeSingle(),
@@ -219,7 +221,7 @@ export async function generateMetadataAction(clipId: string): Promise<ActionResu
     if (!tags.some((t) => t.toLowerCase() === "#shorts")) tags.unshift("#shorts");
     const result = { title: out.title.trim().slice(0, 100), description: out.description.trim().slice(0, 5000), tags };
 
-    await upsertEdit(sb, user.id, clipId, { yt_title: result.title, yt_description: result.description, yt_tags: result.tags });
+    await upsertEdit(sb, workspaceId, clipId, { yt_title: result.title, yt_description: result.description, yt_tags: result.tags });
     return { ok: true, data: result };
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError) return { ok: false, error: "Your Anthropic API key was rejected — check ANTHROPIC_API_KEY." };
@@ -239,8 +241,8 @@ export async function saveMetadataAction(clipId: string, input: { title: string;
     .safeParse(input);
   if (!uuid.safeParse(clipId).success || !p.success) return { ok: false, error: "Invalid metadata (title max 100, description max 5000 characters)" };
   try {
-    const { sb, user } = await requireUser();
-    await upsertEdit(sb, user.id, clipId, { yt_title: p.data.title, yt_description: p.data.description, yt_tags: p.data.tags });
+    const { sb, workspaceId } = await requireUser();
+    await upsertEdit(sb, workspaceId, clipId, { yt_title: p.data.title, yt_description: p.data.description, yt_tags: p.data.tags });
     return { ok: true, data: undefined };
   } catch (err) {
     return fail(err);

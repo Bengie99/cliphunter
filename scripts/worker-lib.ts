@@ -20,6 +20,13 @@ export function loadEnvFile(file: string) {
 loadEnvFile(path.join(process.cwd(), ".env.local"));
 loadEnvFile(path.join(process.cwd(), ".env"));
 
+// Packaged ClipHunter Helper: public settings (Supabase URL + anon key) come from config.json.
+const configFile = process.env.CLIPHUNTER_CONFIG;
+if (configFile && fs.existsSync(configFile)) {
+  const cfg = JSON.parse(fs.readFileSync(configFile, "utf8")) as Record<string, string>;
+  for (const [k, v] of Object.entries(cfg)) if (process.env[k] === undefined) process.env[k] = String(v);
+}
+
 export const env = (k: string) => process.env[k]?.trim() || "";
 export const FOOTAGE_DIR = path.resolve(env("CLIPHUNTER_FOOTAGE_DIR") || path.join(process.cwd(), "footage"));
 

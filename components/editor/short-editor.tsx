@@ -33,7 +33,8 @@ type JobStatus = "none" | "queued" | "running" | "done" | "failed";
 
 export interface EditorData {
   clip: { id: string; title: string; creatorName: string | null; platform: Platform };
-  userId: string;
+  /** Team workspace id — Storage paths live under it. */
+  workspaceId: string;
   spec: EditSpec;
   proxyUrl: string;
   audio: { id: string; kind: "music" | "sfx"; name: string; url: string }[];
@@ -461,7 +462,7 @@ function AudioPanel({ spec, update, data, outT }: PanelProps & { data: EditorDat
     setUploading(true);
     try {
       const safe = file.name.replace(/[^\w.-]+/g, "_").slice(-80);
-      const path = `${data.userId}/audio/${crypto.randomUUID()}-${safe}`;
+      const path = `${data.workspaceId}/audio/${crypto.randomUUID()}-${safe}`;
       const { error } = await createSupabaseBrowserClient().storage.from("media").upload(path, file, { contentType: file.type || "audio/mpeg" });
       if (error) throw new Error(error.message);
       const res = await registerAudioAssetAction({ kind, name: file.name.replace(/\.[^.]+$/, ""), storagePath: path });

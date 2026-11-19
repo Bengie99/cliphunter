@@ -10,6 +10,7 @@ import { getUsersByLogin, twitchConfigured } from "@/lib/integrations/twitch";
 import { getChannelByHandle, getChannelsById, youtubeConfigured, type YouTubeChannel } from "@/lib/integrations/youtube";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getWorkspaceId } from "@/lib/supabase/workspace";
 import { PERMISSION_STATUSES } from "@/lib/types";
 import type { ActionResult } from "./actions";
 
@@ -20,7 +21,7 @@ async function requireUser() {
     data: { user },
   } = await sb.auth.getUser();
   if (!user) throw new Error("You're signed out. Sign in again.");
-  return { sb, user };
+  return { sb, user, workspaceId: await getWorkspaceId(sb) };
 }
 
 const fail = (err: unknown): { ok: false; error: string } => {
@@ -58,10 +59,10 @@ export async function saveDiscoverySettingsAction(platform: DiscoveryPlatform, i
   if (!pl.success) return { ok: false, error: "Unknown platform" };
   if (!p.success) return { ok: false, error: p.error.issues[0]?.message ?? "Invalid settings" };
   try {
-    const { sb, user } = await requireUser();
+    const { sb, workspaceId } = await requireUser();
     const { error } = await sb
       .from("discovery_settings")
-      .upsert({ ...p.data, owner_id: user.id, platform: pl.data }, { onConflict: "owner_id,platform" });
+      .upsert({ ...p.data, owner_id: workspaceId, platform: pl.data }, { onConflict: "owner_id,platform" });
     if (error) throw new Error(`Saving settings failed: ${error.message}`);
     revalidatePath("/integrations");
     return { ok: true, data: undefined };
@@ -74,9 +75,9 @@ export async function runDiscoveryNowAction(platform: DiscoveryPlatform): Promis
   const pl = platformSchema.safeParse(platform);
   if (!pl.success) return { ok: false, error: "Unknown platform" };
   try {
-    const { sb, user } = await requireUser();
+    const { sb, workspaceId } = await requireUser();
     const saved = await getSettings(sb, pl.data);
-    const settings = { ...DEFAULTS[pl.data], last_search_at: null, ...saved, owner_id: user.id };
+    const settings = { ...DEFAULTS[pl.data], last_search_at: null, ...saved, owner_id: workspaceId };
     const summary = await RUNNERS[pl.data](createSupabaseAdminClient(), settings, "manual");
     revalidatePath("/", "layout");
     return { ok: true, data: summary };
@@ -126,13 +127,13 @@ export async function addTwitchStreamersAction(text: string): Promise<ActionResu
   const invalid = entries.filter((e) => !toTwitchLogin(e));
   const logins = [...new Set(entries.map(toTwitchLogin).filter((l): l is string => Boolean(l)))];
   try {
-    const { sb, user } = await requireUser();
+    const { sb, workspaceId } = await requireUser();
     if (!twitchConfigured()) return { ok: false, error: "Twitch keys aren't set in the environment yet." };
     const found = logins.length ? await getUsersByLogin(logins) : [];
     if (found.length) {
       const { error } = await sb.from("creators").upsert(
         found.map((u) => ({
-          owner_id: user.id,
+          owner_id: workspaceId,
           platform: "twitch",
           external_creator_id: u.login,
           name: u.display_name,
@@ -162,7 +163,7 @@ export async function addYouTubeChannelsAction(text: string): Promise<ActionResu
   const refs = rows.map((r) => ({ raw: r, ref: toYouTubeRef(r) })).filter((r) => !/^streamer\s/i.test(r.raw)); // skip header row
   const invalid = refs.filter((r) => !r.ref).map((r) => r.raw);
   try {
-    const { sb, user } = await requireUser();
+    const { sb, workspaceId } = await requireUser();
     if (!youtubeConfigured()) return { ok: false, error: "YOUTUBE_API_KEY isn't set in the environment yet." };
 
     const found: YouTubeChannel[] = [];
@@ -185,7 +186,7 @@ export async function addYouTubeChannelsAction(text: string): Promise<ActionResu
     if (unique.length) {
       const { error } = await sb.from("creators").upsert(
         unique.map((c) => ({
-          owner_id: user.id,
+          owner_id: workspaceId,
           platform: "youtube",
           external_creator_id: c.id,
           name: c.title,

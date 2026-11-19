@@ -1,14 +1,16 @@
 /**
- * ClipHunter PC helper — runs on your PC.  Start: npm run worker   Stop: Ctrl+C
+ * ClipHunter Helper — runs on each team member's PC.
+ *   From the code: npm run worker      Packaged: "Start ClipHunter Helper"      Stop: Ctrl+C
  *
- * Also runs the editor jobs (preview copies, subtitles, renders) — see worker-media.ts.
- *
- * Picks up clips you queued with the Download button, downloads them with
+ * Picks up clips YOU queued with the Download button, downloads them with
  * yt-dlp, reads duration/resolution with ffprobe and records the file so it
- * shows on the Downloaded Footage page.
+ * shows on the Downloaded Footage page. Also runs the editor jobs (preview
+ * copies, subtitles, renders) for files on THIS PC — see worker-media.ts.
  *
- * - Signs in as YOU (email + password from .env.local), so row level security
- *   applies: it can only see and change your own data. No service-role key.
+ * - Signs in as you (worker-auth.ts), so row level security applies: it only
+ *   sees your team's data. No service-role key.
+ * - Team: each person's helper only takes downloads they queued, and editor
+ *   jobs for files on their own PC.
  * - Only downloads clips that are authorized (creator permission granted) or that
  *   you explicitly marked "transformative use". The database enforces this too.
  * - Runs at below-normal CPU priority, one download at a time.
@@ -19,13 +21,15 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { checkTool, die, env, FOOTAGE_DIR, log, lowerPriority, probe, run, sha256 } from "./worker-lib";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { signIn } from "./worker-auth";
+import { checkTool, die, FOOTAGE_DIR, log, lowerPriority, probe, run, sha256 } from "./worker-lib";
 import { initMedia, runMediaTask } from "./worker-media";
 
 const POLL_MS = 15_000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 const AUTHORIZED = new Set(["transformative_use", "download_authorized", "republish_authorized"]);
+let myUserId = "";
 
 // ---------------------------------------------------------------------------
 // main
@@ -43,29 +47,28 @@ type Job = {
 
 async function main() {
   lowerPriority(process.pid);
-  console.log("\nClipHunter download helper\n");
-
-  const url = env("NEXT_PUBLIC_SUPABASE_URL");
-  const anon = env("NEXT_PUBLIC_SUPABASE_ANON_KEY");
-  const email = env("CLIPHUNTER_WORKER_EMAIL");
-  const password = env("CLIPHUNTER_WORKER_PASSWORD");
-  if (!url || !anon) die("NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be set in .env.local");
-  if (!email || !password) die("Set CLIPHUNTER_WORKER_EMAIL and CLIPHUNTER_WORKER_PASSWORD (your app login) in .env.local");
+  console.log("\nClipHunter Helper\n");
 
   log(`yt-dlp ${await checkTool("yt-dlp", "--version", "winget install yt-dlp.yt-dlp")}`);
   log(await checkTool("ffprobe", "-version", "winget install Gyan.FFmpeg"));
 
-  const sb = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: true } });
-  const { data: auth, error: authErr } = await sb.auth.signInWithPassword({ email, password });
-  if (authErr || !auth.user) die(`Sign-in failed: ${authErr?.message ?? "unknown error"}`);
-  log(`Signed in as ${auth.user.email}`);
-  await initMedia(sb, auth.user.id);
+  const { sb, userId, email } = await signIn();
+  const { data: workspaceId, error: wsErr } = await sb.rpc("workspace_id");
+  if (wsErr || !workspaceId) die(`Couldn't load your team workspace: ${wsErr?.message ?? "none"}. Has the team migration been run?`);
+  log(`Signed in as ${email}${workspaceId !== userId ? " (team member)" : ""}`);
+  myUserId = userId;
+  await initMedia(sb, workspaceId as string, userId);
 
   fs.mkdirSync(FOOTAGE_DIR, { recursive: true });
   log(`Saving footage to ${FOOTAGE_DIR}`);
 
-  // A previous run that crashed mid-download leaves clips stuck in 'downloading'.
-  const { data: stale } = await sb.from("clips").update({ download_status: "queued" }).eq("download_status", "downloading").select("id");
+  // A previous run that crashed mid-download leaves clips stuck in 'downloading' (only ours).
+  const { data: stale } = await sb
+    .from("clips")
+    .update({ download_status: "queued" })
+    .eq("download_status", "downloading")
+    .or(`download_requested_by.is.null,download_requested_by.eq.${userId}`)
+    .select("id");
   if (stale?.length) log(`Re-queued ${stale.length} interrupted download(s)`);
 
   let current: string | null = null;
@@ -115,6 +118,8 @@ async function claimNext(sb: SupabaseClient): Promise<Job | null> {
     .from("clips")
     .select("id, platform, external_clip_id, original_url, title, creator_name, rights_status, pipeline_status")
     .eq("download_status", "queued")
+    // only downloads this person queued — the file must land on their PC
+    .or(`download_requested_by.is.null,download_requested_by.eq.${myUserId}`)
     .order("download_requested_at", { ascending: true, nullsFirst: false })
     .limit(1);
   if (error) throw new Error(error.message);

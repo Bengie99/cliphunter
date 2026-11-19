@@ -24,7 +24,7 @@ async function client() {
     data: { user },
   } = await sb.auth.getUser();
   if (!user) throw new Error("You're signed out. Sign in again.");
-  return sb;
+  return { sb, userId: user.id };
 }
 
 const idsSchema = z.array(z.string().uuid()).min(1).max(200);
@@ -36,7 +36,7 @@ export async function queueDownloadsAction(
   const p = idsSchema.safeParse(ids);
   if (!p.success) return { ok: false, error: "Invalid request" };
   try {
-    const sb = await client();
+    const { sb, userId } = await client();
     if (opts.withoutPermission === true) {
       const { error: markErr } = await sb
         .from("clips")
@@ -47,7 +47,8 @@ export async function queueDownloadsAction(
     }
     const { data, error } = await sb
       .from("clips")
-      .update({ download_status: "queued", download_error: null, download_requested_at: new Date().toISOString() })
+      // the helper of whoever clicked Download picks it up — the file lands on their PC
+      .update({ download_status: "queued", download_error: null, download_requested_at: new Date().toISOString(), download_requested_by: userId })
       .in("id", p.data)
       .in("rights_status", DOWNLOADABLE)
       .in("download_status", ["not_available", "awaiting_authorization", "ready", "failed"])
@@ -68,7 +69,7 @@ export async function queueDownloadsAction(
 export async function cancelDownloadAction(id: string): Promise<ActionResult> {
   if (!z.string().uuid().safeParse(id).success) return { ok: false, error: "Invalid request" };
   try {
-    const sb = await client();
+    const { sb } = await client();
     const { error } = await sb
       .from("clips")
       .update({ download_status: "not_available", download_requested_at: null })

@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDataMode } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getWorkspaceId } from "@/lib/supabase/workspace";
 import { defaultSpec, type EditSpec, type Word } from "@/remotion/spec";
 
 export const metadata = { title: "Editor" };
@@ -104,7 +105,7 @@ export default async function EditorPage({ params }: { params: { clipId: string 
 
   const data: EditorData = {
     clip: { id: clip.id, title: clip.title, creatorName: clip.creator_name, platform: clip.platform },
-    userId: user.id,
+    workspaceId: await getWorkspaceId(sb),
     spec,
     proxyUrl: signed[0].signedUrl,
     audio: audioAssets.map((a, i) => ({ id: a.id, kind: a.kind, name: a.name, url: signed[i + 1]?.signedUrl ?? "" })),
