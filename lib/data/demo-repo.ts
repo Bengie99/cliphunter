@@ -49,7 +49,11 @@ export interface DemoDb {
 export class DemoRepository implements ClipRepository {
   readonly mode = "demo" as const;
 
-  constructor(private readonly file = path.join(process.cwd(), ".data", "demo-db.json")) {}
+  // On Vercel the deployment filesystem is read-only; only /tmp is writable
+  // (and ephemeral per serverless instance — fine for demo data).
+  constructor(
+    private readonly file = path.join(process.env.VERCEL ? "/tmp" : process.cwd(), ".data", "demo-db.json"),
+  ) {}
 
   // -- persistence ----------------------------------------------------------
   private load(): DemoDb {
