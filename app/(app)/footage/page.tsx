@@ -179,6 +179,14 @@ export default async function FootagePage() {
                         {f.file_name}
                       </code>
                       <CopyPathButton path={f.file_path} />
+                      {f.clips && (
+                        <Link
+                          href={`/editor/${f.clips.id}`}
+                          className="ml-1 inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                        >
+                          Edit
+                        </Link>
+                      )}
                     </div>
                   </td>
                 </tr>

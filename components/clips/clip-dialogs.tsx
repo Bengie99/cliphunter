@@ -80,7 +80,7 @@ export function DownloadButton({ clip, size = "sm" }: { clip: Clip; size?: "sm" 
       : status === "downloading"
         ? { label: "Downloading", title: "The helper is downloading this clip.", icon: <Loader2 className="animate-spin" />, disabled: true }
         : status === "downloaded"
-          ? { label: "Downloaded", title: "Saved on your PC — see Downloaded Footage.", icon: <HardDriveDownload />, disabled: false, onClick: () => router.push("/footage") }
+          ? { label: "Edit", title: "Downloaded — open it in the editor.", icon: <HardDriveDownload />, disabled: false, onClick: () => router.push(`/editor/${clip.id}`) }
           : {
               label: status === "failed" ? "Retry" : "Download",
               title: status === "failed" ? "The last download failed — click to retry. Details on Downloaded Footage." : "Queue this clip for download",

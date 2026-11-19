@@ -32,6 +32,6 @@ export function integrationEnvStatus() {
     tiktok: has("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"),
     instagram: has("INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"),
     redis: has("REDIS_URL"),
-    openai: has("OPENAI_API_KEY"),
+    anthropic: has("ANTHROPIC_API_KEY"),
   };
 }

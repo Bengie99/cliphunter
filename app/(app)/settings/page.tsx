@@ -13,7 +13,7 @@ export default function SettingsPage() {
     ["Supabase (database + auth)", env.supabase, "NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY"],
     ["Supabase service role (workers)", env.supabaseServiceRole, "SUPABASE_SERVICE_ROLE_KEY — needed for discovery"],
     ["Redis (job queue)", env.redis, "REDIS_URL — Phase 2"],
-    ["OpenAI (AI features)", env.openai, "OPENAI_API_KEY — future"],
+    ["Claude (description writer)", env.anthropic, "ANTHROPIC_API_KEY"],
   ];
   return (
     <div className="space-y-5">
