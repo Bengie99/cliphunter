@@ -77,7 +77,7 @@ export default async function FootagePage() {
     <div className="space-y-5">
       <PageHeader
         title="Downloaded Footage"
-        description="Clips you queued with the Download button are saved on your PC by the download helper. Only clips from creators with permission on file can be downloaded."
+        description="Clips you queued with the Download button are saved on your PC by the download helper. Clips without creator permission are marked Transformative use."
       />
 
       {loadError && (
@@ -95,7 +95,7 @@ export default async function FootagePage() {
         </CardHeader>
         <CardContent>
           {queueRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing waiting. Click Download on a clip from a creator with permission granted.</p>
+            <p className="text-sm text-muted-foreground">Nothing waiting. Click Download on any clip to queue it.</p>
           ) : (
             <ul className="divide-y text-sm">
               {queueRows.map((q) => (

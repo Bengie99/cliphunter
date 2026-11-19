@@ -8,11 +8,14 @@ import type { ActionResult } from "./actions";
 
 /**
  * Download queue. The web app only queues; the helper on the user's PC
- * (`npm run worker`) does the downloading. Only clips whose rights status is
- * authorized can be queued — also enforced by a database constraint.
+ * (`npm run worker`) does the downloading. A clip can be queued when its
+ * creator granted permission, or — after the user confirms — without
+ * permission, in which case it is marked "transformative_use" so the record
+ * stays honest. Also enforced by a database constraint.
  */
 
-const AUTHORIZED = ["download_authorized", "republish_authorized"];
+const DOWNLOADABLE = ["transformative_use", "download_authorized", "republish_authorized"];
+const UNPERMITTED = ["unknown", "public_discoverable", "preview_allowed"];
 
 async function client() {
   if (getDataMode() !== "supabase") throw new Error("Downloads need Supabase — they aren't available in demo mode.");
@@ -26,16 +29,27 @@ async function client() {
 
 const idsSchema = z.array(z.string().uuid()).min(1).max(200);
 
-export async function queueDownloadsAction(ids: string[]): Promise<ActionResult<{ queued: number; skipped: number }>> {
+export async function queueDownloadsAction(
+  ids: string[],
+  opts: { withoutPermission?: boolean } = {},
+): Promise<ActionResult<{ queued: number; skipped: number }>> {
   const p = idsSchema.safeParse(ids);
   if (!p.success) return { ok: false, error: "Invalid request" };
   try {
     const sb = await client();
+    if (opts.withoutPermission === true) {
+      const { error: markErr } = await sb
+        .from("clips")
+        .update({ rights_status: "transformative_use" })
+        .in("id", p.data)
+        .in("rights_status", UNPERMITTED);
+      if (markErr) throw new Error(`Marking clips failed: ${markErr.message}`);
+    }
     const { data, error } = await sb
       .from("clips")
       .update({ download_status: "queued", download_error: null, download_requested_at: new Date().toISOString() })
       .in("id", p.data)
-      .in("rights_status", AUTHORIZED)
+      .in("rights_status", DOWNLOADABLE)
       .in("download_status", ["not_available", "awaiting_authorization", "ready", "failed"])
       .select("id, pipeline_status");
     if (error) throw new Error(`Queueing failed: ${error.message}`);

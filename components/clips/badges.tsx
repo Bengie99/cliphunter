@@ -56,7 +56,7 @@ export function ReviewBadge({ status }: { status: ReviewStatus }) {
 }
 
 export function RightsBadge({ status }: { status: RightsStatus }) {
-  const variant = status === "republish_authorized" || status === "download_authorized" ? "success" : status === "unknown" ? "outline" : "secondary";
+  const variant = status === "republish_authorized" || status === "download_authorized" ? "success" : status === "transformative_use" ? "warning" : status === "unknown" ? "outline" : "secondary";
   return (
     <Badge variant={variant} title={RIGHTS_HINT[status]}>
       {RIGHTS_LABEL[status]}

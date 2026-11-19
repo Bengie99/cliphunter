@@ -28,6 +28,7 @@ export const RIGHTS_STATUSES = [
   "unknown",
   "public_discoverable",
   "preview_allowed",
+  "transformative_use",
   "download_authorized",
   "republish_authorized",
 ] as const;

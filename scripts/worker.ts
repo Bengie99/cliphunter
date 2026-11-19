@@ -7,8 +7,8 @@
  *
  * - Signs in as YOU (email + password from .env.local), so row level security
  *   applies: it can only see and change your own data. No service-role key.
- * - Only downloads clips whose rights status is authorized (creator permission
- *   granted). The database refuses to queue anything else as well.
+ * - Only downloads clips that are authorized (creator permission granted) or that
+ *   you explicitly marked "transformative use". The database enforces this too.
  * - Runs at below-normal CPU priority, one download at a time.
  *
  * Needs on PATH: yt-dlp and ffmpeg/ffprobe
@@ -24,7 +24,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const POLL_MS = 15_000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
-const AUTHORIZED = new Set(["download_authorized", "republish_authorized"]);
+const AUTHORIZED = new Set(["transformative_use", "download_authorized", "republish_authorized"]);
 
 // ---------------------------------------------------------------------------
 // config
@@ -216,7 +216,7 @@ async function processJob(sb: SupabaseClient, job: Job) {
     await sb.from("clips").update({ download_status: "failed", download_error: message.slice(0, 500) }).eq("id", job.id);
   };
 
-  if (!AUTHORIZED.has(job.rights_status)) return fail("Not authorized — creator permission is not granted.");
+  if (!AUTHORIZED.has(job.rights_status)) return fail("Not downloadable — no permission and not marked for transformative use.");
 
   log(`↓ ${label}`);
   const dir = path.join(FOOTAGE_DIR, job.platform);

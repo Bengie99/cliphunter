@@ -1,11 +1,12 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Clock, Download, ExternalLink, HardDriveDownload, Loader2, RotateCcw, Star, X } from "lucide-react";
 import { toast } from "sonner";
 import { cancelDownloadAction, queueDownloadsAction } from "@/app/download-actions";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatCount, formatDate, formatDuration, timeAgo } from "@/lib/format";
 import { PLATFORM_META } from "@/lib/platforms";
@@ -20,18 +21,48 @@ import { useClipActions } from "./use-clip-actions";
  * Queues an authorized clip for the download helper on the user's PC.
  * Clips without creator permission stay disabled, with the reason as tooltip.
  */
+const SKIP_CONFIRM_KEY = "cliphunter:skip-transformative-confirm";
+
 export function DownloadButton({ clip, size = "sm" }: { clip: Clip; size?: "sm" | "icon-sm" }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const authorized = clip.rights_status === "download_authorized" || clip.rights_status === "republish_authorized";
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [dontAsk, setDontAsk] = useState(false);
+  const authorized =
+    clip.rights_status === "download_authorized" ||
+    clip.rights_status === "republish_authorized" ||
+    clip.rights_status === "transformative_use";
   const status = clip.download_status;
+
+  const queue = (withoutPermission: boolean) =>
+    start(async () => {
+      const res = await queueDownloadsAction([clip.id], { withoutPermission });
+      if (!res.ok) toast.error(res.error);
+      else if (res.data.queued === 0) toast.warning("This clip couldn't be queued.");
+      else {
+        toast.success("Queued — the download helper on your PC will pick it up.");
+        router.refresh();
+      }
+    });
+
+  const askThenQueue = () => {
+    let skip = false;
+    try {
+      skip = localStorage.getItem(SKIP_CONFIRM_KEY) === "1";
+    } catch {
+      /* storage unavailable — just ask */
+    }
+    if (skip) queue(true);
+    else setConfirmOpen(true);
+  };
 
   const state: { label: string; title: string; icon: React.ReactNode; disabled: boolean; onClick?: () => void } = !authorized
     ? {
         label: "Download",
-        title: "Needs permission: mark the creator's permission as Granted on the Creators page.",
+        title: "No permission on file — you'll be asked to confirm transformative use.",
         icon: <Download />,
-        disabled: true,
+        disabled: pending,
+        onClick: askThenQueue,
       }
     : status === "queued"
       ? {
@@ -55,19 +86,52 @@ export function DownloadButton({ clip, size = "sm" }: { clip: Clip; size?: "sm" 
               title: status === "failed" ? "The last download failed — click to retry. Details on Downloaded Footage." : "Queue this clip for download",
               icon: status === "failed" ? <RotateCcw /> : <Download />,
               disabled: pending,
-              onClick: () =>
-                start(async () => {
-                  const res = await queueDownloadsAction([clip.id]);
-                  if (!res.ok) toast.error(res.error);
-                  else if (res.data.queued === 0) toast.warning("This clip can't be downloaded (no permission on file).");
-                  else {
-                    toast.success("Queued — the download helper on your PC will pick it up.");
-                    router.refresh();
-                  }
-                }),
+              onClick: () => queue(false),
             };
 
   return (
+    <>
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Download without permission?</DialogTitle>
+          <DialogDescription>
+            {clip.creator_name ?? "This creator"} hasn&apos;t granted permission. The clip will be marked{" "}
+            <span className="font-medium text-amber-300">Transformative use</span> so you can always see which footage has no
+            permission behind it.
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          <li>Edit it substantially (your own hook, captions, cuts, commentary). A straight re-upload is the most likely to get claimed.</li>
+          <li>Mute or replace background music: Content ID flags it regardless of edits.</li>
+          <li>If the creator asks you to take it down, remove it. Three copyright strikes and YouTube deletes the channel.</li>
+        </ul>
+        <label className="flex items-center gap-2 text-xs">
+          <Checkbox checked={dontAsk} onCheckedChange={(v) => setDontAsk(v === true)} />
+          Don&apos;t ask again on this browser
+        </label>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              if (dontAsk) {
+                try {
+                  localStorage.setItem(SKIP_CONFIRM_KEY, "1");
+                } catch {
+                  /* ignore */
+                }
+              }
+              setConfirmOpen(false);
+              queue(true);
+            }}
+          >
+            <Download /> Download for transformative use
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
     <span title={state.title} className="inline-flex">
       <Button
         size={size}
@@ -81,6 +145,7 @@ export function DownloadButton({ clip, size = "sm" }: { clip: Clip; size?: "sm" 
         {size === "sm" && state.label}
       </Button>
     </span>
+    </>
   );
 }
 

@@ -84,6 +84,7 @@ export const RIGHTS_LABEL: Record<RightsStatus, string> = {
   unknown: "Unknown",
   public_discoverable: "Publicly discoverable",
   preview_allowed: "Preview allowed",
+  transformative_use: "Transformative use",
   download_authorized: "Download authorized",
   republish_authorized: "Republish authorized",
 };
@@ -92,6 +93,7 @@ export const RIGHTS_HINT: Record<RightsStatus, string> = {
   unknown: "No rights information recorded yet.",
   public_discoverable: "Publicly visible. Discovery does not imply permission to download or republish.",
   preview_allowed: "Can be previewed via the platform's official embed.",
+  transformative_use: "Downloaded WITHOUT creator permission, to be substantially edited. Higher risk of claims/strikes than permitted clips.",
   download_authorized: "You have permission to download the source footage.",
   republish_authorized: "You have permission to republish (e.g. creator approval or licence on file).",
 };
