@@ -2,25 +2,39 @@ import Link from "next/link";
 import { Users } from "lucide-react";
 import { PlatformBadge, ScoreBadge } from "@/components/clips/badges";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
+import { AddStreamersForm } from "@/components/discovery/add-streamers-form";
+import { MonitorToggle } from "@/components/discovery/monitor-toggle";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRepository } from "@/lib/data";
+import { getDataMode } from "@/lib/env";
 import { formatDate } from "@/lib/format";
 
 export const metadata = { title: "Streamers & Creators" };
 
 export default async function CreatorsPage() {
   const creators = await getRepository().listCreators();
+  const canMonitor = getDataMode() === "supabase";
   return (
     <div className="space-y-5">
       <PageHeader
         title="Streamers & Creators"
-        description="Creators are added automatically when you submit their clips. Monitoring and per-creator discovery settings arrive with the Phase 2 integrations."
+        description="Monitored Twitch streamers are checked for new clips on every discovery run. Click a badge to switch monitoring on or off."
       />
+      {canMonitor && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Monitor Twitch streamers</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AddStreamersForm />
+          </CardContent>
+        </Card>
+      )}
       {creators.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-center">
           <Users className="mb-3 size-8 text-muted-foreground" />
           <p className="font-medium">No creators yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">Add a clip with a creator name and they&apos;ll appear here.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Add Twitch streamers above, or add a clip with a creator name.</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border bg-card">
@@ -58,7 +72,7 @@ export default async function CreatorsPage() {
                     <ScoreBadge score={c.avg_viral_score} />
                   </td>
                   <td className="px-4 py-2.5">
-                    {c.is_monitored ? <Badge variant="success">Monitored</Badge> : <Badge variant="outline">Not monitored</Badge>}
+                    <MonitorToggle creatorId={c.id} monitored={c.is_monitored} enabled={canMonitor && c.platform === "twitch"} />
                   </td>
                   <td className="px-4 py-2.5 text-muted-foreground">{formatDate(c.created_at)}</td>
                 </tr>

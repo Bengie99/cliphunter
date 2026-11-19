@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getDataMode, supabaseConfig } from "../env";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+// /api/cron authenticates with CRON_SECRET instead of a user session.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/cron"];
 
 /**
  * Refreshes the Supabase session cookie on every request and redirects

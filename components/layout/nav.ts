@@ -56,7 +56,7 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: "Sources",
     items: [
       { href: "/creators", label: "Streamers & Creators", icon: Users },
-      { href: "/integrations", label: "Platform Integrations", icon: Plug, phase: 2 },
+      { href: "/integrations", label: "Platform Integrations", icon: Plug },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
