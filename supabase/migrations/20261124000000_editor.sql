@@ -37,6 +37,7 @@ create table if not exists public.clip_edits (
   updated_at timestamptz not null default now(),
   unique (owner_id, clip_id)
 );
+drop trigger if exists trg_clip_edits_updated on public.clip_edits;
 create trigger trg_clip_edits_updated before update on public.clip_edits
   for each row execute function public.set_updated_at();
 
@@ -51,6 +52,8 @@ create table if not exists public.audio_assets (
 
 alter table public.clip_edits enable row level security;
 alter table public.audio_assets enable row level security;
+drop policy if exists "clip_edits: owner access" on public.clip_edits;
+drop policy if exists "audio_assets: owner access" on public.audio_assets;
 create policy "clip_edits: owner access" on public.clip_edits for all to authenticated
   using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create policy "audio_assets: owner access" on public.audio_assets for all to authenticated
@@ -63,6 +66,10 @@ insert into storage.buckets (id, name, public, file_size_limit)
 values ('media', 'media', false, 52428800)
 on conflict (id) do nothing;
 
+drop policy if exists "media: owner read" on storage.objects;
+drop policy if exists "media: owner insert" on storage.objects;
+drop policy if exists "media: owner update" on storage.objects;
+drop policy if exists "media: owner delete" on storage.objects;
 create policy "media: owner read" on storage.objects for select to authenticated
   using (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "media: owner insert" on storage.objects for insert to authenticated

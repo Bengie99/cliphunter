@@ -30,10 +30,12 @@ $$;
 grant execute on function public.workspace_id() to authenticated;
 
 alter table public.team_members enable row level security;
+drop policy if exists "team_members: workspace read" on public.team_members;
 create policy "team_members: workspace read" on public.team_members for select to authenticated
   using (workspace_owner_id = (select public.workspace_id()));
 
 -- Teammates can see each other's email (e.g. "downloaded on Igor's PC").
+drop policy if exists "users: workspace read" on public.users;
 create policy "users: workspace read" on public.users for select to authenticated
   using (
     id = (select public.workspace_id())
@@ -53,6 +55,7 @@ begin
   ] loop
     execute format('alter table public.%I alter column owner_id set default public.workspace_id()', t);
     execute format('drop policy if exists "%1$s: owner access" on public.%1$I', t);
+    execute format('drop policy if exists "%1$s: workspace access" on public.%1$I', t);
     execute format(
       'create policy "%1$s: workspace access" on public.%1$I for all to authenticated
          using (owner_id = (select public.workspace_id())) with check (owner_id = (select public.workspace_id()))', t);
@@ -61,6 +64,7 @@ end $$;
 
 alter table public.discovery_runs alter column owner_id set default public.workspace_id();
 drop policy if exists "discovery_runs: owner read" on public.discovery_runs;
+drop policy if exists "discovery_runs: workspace read" on public.discovery_runs;
 create policy "discovery_runs: workspace read" on public.discovery_runs for select to authenticated
   using (owner_id = (select public.workspace_id()));
 
@@ -82,6 +86,10 @@ drop policy if exists "media: owner read" on storage.objects;
 drop policy if exists "media: owner insert" on storage.objects;
 drop policy if exists "media: owner update" on storage.objects;
 drop policy if exists "media: owner delete" on storage.objects;
+drop policy if exists "media: workspace read" on storage.objects;
+drop policy if exists "media: workspace insert" on storage.objects;
+drop policy if exists "media: workspace update" on storage.objects;
+drop policy if exists "media: workspace delete" on storage.objects;
 create policy "media: workspace read" on storage.objects for select to authenticated
   using (bucket_id = 'media' and (storage.foldername(name))[1] = (select public.workspace_id())::text);
 create policy "media: workspace insert" on storage.objects for insert to authenticated
