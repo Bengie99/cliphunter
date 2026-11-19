@@ -100,6 +100,7 @@ export const DOWNLOAD_LABEL: Record<DownloadStatus, string> = {
   not_available: "Not available",
   awaiting_authorization: "Awaiting authorization",
   ready: "Ready to download",
+  queued: "Queued",
   downloading: "Downloading",
   downloaded: "Downloaded",
   failed: "Failed",

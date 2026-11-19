@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx scripts/smoke-test.ts",
-    "demo:reset": "node -e \"require('fs').rmSync('.data',{recursive:true,force:true});console.log('Demo data reset')\""
+    "demo:reset": "node -e \"require('fs').rmSync('.data',{recursive:true,force:true});console.log('Demo data reset')\"",
+    "worker": "tsx scripts/worker.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.4.1",

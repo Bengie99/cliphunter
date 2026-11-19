@@ -48,7 +48,7 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Production",
     items: [
-      { href: "/footage", label: "Downloaded Footage", icon: HardDrive, phase: 4 },
+      { href: "/footage", label: "Downloaded Footage", icon: HardDrive },
       { href: "/pipeline", label: "Content Pipeline", icon: Kanban, phase: 5 },
     ],
   },

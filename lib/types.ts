@@ -37,6 +37,7 @@ export const DOWNLOAD_STATUSES = [
   "not_available",
   "awaiting_authorization",
   "ready",
+  "queued",
   "downloading",
   "downloaded",
   "failed",

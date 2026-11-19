@@ -1,6 +1,10 @@
 "use client";
 
-import { Check, Download, ExternalLink, Star, X } from "lucide-react";
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Check, Clock, Download, ExternalLink, HardDriveDownload, Loader2, RotateCcw, Star, X } from "lucide-react";
+import { toast } from "sonner";
+import { cancelDownloadAction, queueDownloadsAction } from "@/app/download-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatCount, formatDate, formatDuration, timeAgo } from "@/lib/format";
@@ -13,19 +17,68 @@ import { NotesPanel } from "./notes-panel";
 import { useClipActions } from "./use-clip-actions";
 
 /**
- * Download is a Phase 4 feature and must only ever be enabled for clips with
- * an authorized source. Until then it is rendered disabled with the reason.
+ * Queues an authorized clip for the download helper on the user's PC.
+ * Clips without creator permission stay disabled, with the reason as tooltip.
  */
 export function DownloadButton({ clip, size = "sm" }: { clip: Clip; size?: "sm" | "icon-sm" }) {
-  const reason =
-    clip.rights_status === "download_authorized" || clip.rights_status === "republish_authorized"
-      ? "Authorized downloads are implemented in Phase 4 (footage management)."
-      : "Download unavailable: no authorized download source for this clip.";
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const authorized = clip.rights_status === "download_authorized" || clip.rights_status === "republish_authorized";
+  const status = clip.download_status;
+
+  const state: { label: string; title: string; icon: React.ReactNode; disabled: boolean; onClick?: () => void } = !authorized
+    ? {
+        label: "Download",
+        title: "Needs permission: mark the creator's permission as Granted on the Creators page.",
+        icon: <Download />,
+        disabled: true,
+      }
+    : status === "queued"
+      ? {
+          label: "Queued",
+          title: "Waiting for the download helper (npm run worker). Click to cancel.",
+          icon: <Clock />,
+          disabled: pending,
+          onClick: () =>
+            start(async () => {
+              const res = await cancelDownloadAction(clip.id);
+              if (!res.ok) toast.error(res.error);
+              else router.refresh();
+            }),
+        }
+      : status === "downloading"
+        ? { label: "Downloading", title: "The helper is downloading this clip.", icon: <Loader2 className="animate-spin" />, disabled: true }
+        : status === "downloaded"
+          ? { label: "Downloaded", title: "Saved on your PC — see Downloaded Footage.", icon: <HardDriveDownload />, disabled: false, onClick: () => router.push("/footage") }
+          : {
+              label: status === "failed" ? "Retry" : "Download",
+              title: status === "failed" ? "The last download failed — click to retry. Details on Downloaded Footage." : "Queue this clip for download",
+              icon: status === "failed" ? <RotateCcw /> : <Download />,
+              disabled: pending,
+              onClick: () =>
+                start(async () => {
+                  const res = await queueDownloadsAction([clip.id]);
+                  if (!res.ok) toast.error(res.error);
+                  else if (res.data.queued === 0) toast.warning("This clip can't be downloaded (no permission on file).");
+                  else {
+                    toast.success("Queued — the download helper on your PC will pick it up.");
+                    router.refresh();
+                  }
+                }),
+            };
+
   return (
-    <span title={reason} className="inline-flex">
-      <Button size={size} variant="ghost" disabled aria-label="Download footage (unavailable)">
-        <Download />
-        {size === "sm" && "Download"}
+    <span title={state.title} className="inline-flex">
+      <Button
+        size={size}
+        variant="ghost"
+        disabled={state.disabled}
+        onClick={state.onClick}
+        aria-label={state.label}
+        className={cn(status === "downloaded" && authorized && "text-emerald-300", status === "failed" && authorized && "text-red-300")}
+      >
+        {pending ? <Loader2 className="animate-spin" /> : state.icon}
+        {size === "sm" && state.label}
       </Button>
     </span>
   );

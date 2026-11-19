@@ -5,6 +5,7 @@ out/
 .env
 .env*.local
 .data/
+footage/
 *.tsbuildinfo
 npm-debug.log*
 .DS_Store
