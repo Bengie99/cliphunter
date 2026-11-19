@@ -13,6 +13,7 @@ export interface TwitchUser {
   login: string;
   display_name: string;
   profile_image_url: string;
+  description: string;
 }
 
 export interface TwitchGame {

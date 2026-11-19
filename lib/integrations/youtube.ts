@@ -27,6 +27,7 @@ export interface YouTubeChannel {
   handle: string | null;
   thumbnail: string | null;
   uploadsPlaylistId: string;
+  description: string;
 }
 
 export interface YouTubeVideo {
@@ -81,7 +82,7 @@ const bestThumb = (t: Thumbs | undefined) => t?.maxres?.url ?? t?.high?.url ?? t
 
 interface ChannelItem {
   id: string;
-  snippet: { title: string; customUrl?: string; thumbnails?: Thumbs };
+  snippet: { title: string; customUrl?: string; description?: string; thumbnails?: Thumbs };
   contentDetails: { relatedPlaylists: { uploads: string } };
 }
 
@@ -91,6 +92,7 @@ const toChannel = (c: ChannelItem): YouTubeChannel => ({
   handle: c.snippet.customUrl?.replace(/^@/, "") ?? null,
   thumbnail: bestThumb(c.snippet.thumbnails),
   uploadsPlaylistId: c.contentDetails.relatedPlaylists.uploads,
+  description: c.snippet.description ?? "",
 });
 
 /** Resolve one @handle (without the @). 1 unit. */

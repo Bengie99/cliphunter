@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { AddStreamersForm } from "@/components/discovery/add-streamers-form";
 import { MonitorToggle } from "@/components/discovery/monitor-toggle";
 import { PermissionDialog } from "@/components/discovery/permission-dialog";
+import { ScanBiosButton } from "@/components/discovery/scan-bios-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRepository } from "@/lib/data";
 import { getDataMode } from "@/lib/env";
@@ -19,7 +20,8 @@ export default async function CreatorsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Streamers & Creators"
-        description="Monitored channels are checked for new clips on every discovery run. Click a Monitoring badge to switch it on or off, and a Permission badge to record a creator's permission to clip."
+        description="Monitored channels are checked for new clips on every discovery run. Click a Monitoring badge to switch it on or off, and a Clipping permission badge to set Yes / No."
+        actions={canMonitor ? <ScanBiosButton /> : undefined}
       />
       {canMonitor && (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -58,13 +60,13 @@ export default async function CreatorsPage() {
                 <th className="px-4 py-2.5 text-right font-medium">Clips</th>
                 <th className="px-4 py-2.5 font-medium">Avg. score</th>
                 <th className="px-4 py-2.5 font-medium">Monitoring</th>
-                <th className="px-4 py-2.5 font-medium">Permission</th>
+                <th className="px-4 py-2.5 font-medium">Clipping permission</th>
                 <th className="px-4 py-2.5 font-medium">Added</th>
               </tr>
             </thead>
             <tbody>
               {creators.map((c) => (
-                <tr key={c.id} className="border-b last:border-b-0 hover:bg-white/[0.02]">
+                <tr key={c.id} className="border-b align-top last:border-b-0 hover:bg-white/[0.02]">
                   <td className="px-4 py-2.5">
                     <Link href={`/clips?creator=${c.id}`} className="font-medium hover:text-violet-300">
                       {c.name}
@@ -88,6 +90,13 @@ export default async function CreatorsPage() {
                   </td>
                   <td className="px-4 py-2.5">
                     <PermissionDialog creator={c} editable={canMonitor} />
+                    {c.bio_clip_excerpt ? (
+                      <p className="mt-1 max-w-[280px] text-[11px] leading-snug text-amber-200/90" title="From their public bio — check it, then set Yes/No">
+                        Bio: “{c.bio_clip_excerpt}”
+                      </p>
+                    ) : c.bio_checked_at ? (
+                      <p className="mt-1 text-[11px] text-muted-foreground">Bio says nothing about clipping</p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-2.5 text-muted-foreground">{formatDate(c.created_at)}</td>
                 </tr>

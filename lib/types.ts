@@ -66,6 +66,8 @@ export interface Creator {
   permission_proof_url?: string | null;
   permission_granted_at?: string | null;
   permission_notes?: string | null;
+  bio_clip_excerpt?: string | null;
+  bio_checked_at?: string | null;
 }
 
 export interface CreatorWithStats extends Creator {

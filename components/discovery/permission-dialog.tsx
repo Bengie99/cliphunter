@@ -15,16 +15,31 @@ import { Textarea } from "@/components/ui/textarea";
 import { PERMISSION_STATUSES, type Creator, type PermissionStatus } from "@/lib/types";
 
 const META: Record<PermissionStatus, { label: string; variant: "success" | "warning" | "danger" | "outline" }> = {
-  none: { label: "No permission", variant: "outline" },
+  none: { label: "Unknown", variant: "outline" },
   requested: { label: "Requested", variant: "warning" },
-  granted: { label: "Permission ✓", variant: "success" },
-  denied: { label: "Denied", variant: "danger" },
+  granted: { label: "Yes", variant: "success" },
+  denied: { label: "No", variant: "danger" },
 };
 
 export function PermissionDialog({ creator, editable }: { creator: Creator; editable: boolean }) {
   const router = useRouter();
   const status = creator.permission_status ?? "none";
-  const badge = <Badge variant={META[status].variant}>{META[status].label}</Badge>;
+  const badge = (
+    <span className="inline-flex items-center gap-1.5">
+      <Badge variant={META[status].variant}>{META[status].label}</Badge>
+      {creator.permission_proof_url && (
+        <a
+          href={creator.permission_proof_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[11px] text-muted-foreground hover:underline"
+        >
+          proof ↗
+        </a>
+      )}
+    </span>
+  );
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [form, setForm] = useState({
@@ -60,16 +75,16 @@ export function PermissionDialog({ creator, editable }: { creator: Creator; edit
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <button type="button" title="Edit permission">
+        <button type="button" title="Edit clipping permission">
           {badge}
         </button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Permission — {creator.name}</DialogTitle>
+          <DialogTitle>Clipping permission — {creator.name}</DialogTitle>
           <DialogDescription>
-            Only mark as granted when you have written permission (DM, email, or a public clipping policy / program). Granting
-            marks all of this creator&apos;s clips as authorized; revoking takes that back.
+            Set Yes only with something you can point to: a DM/email, or a public clipping policy or program (bio, panel, Discord,
+            post). Yes marks all of this creator&apos;s clips as authorized; changing it back takes that away.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -78,7 +93,7 @@ export function PermissionDialog({ creator, editable }: { creator: Creator; edit
             <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as PermissionStatus }))}>
               {PERMISSION_STATUSES.map((s) => (
                 <option key={s} value={s}>
-                  {META[s].label.replace(" ✓", "")}
+                  {s === "granted" ? "Yes — allowed to clip" : s === "denied" ? "No — not allowed" : s === "requested" ? "Requested — waiting for an answer" : "Unknown"}
                 </option>
               ))}
             </Select>

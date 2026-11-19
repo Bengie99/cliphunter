@@ -255,3 +255,77 @@ export async function setCreatorPermissionAction(input: PermissionForm): Promise
     return fail(err);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Bio scan — evidence of a public clipping policy (never sets permission)
+// ---------------------------------------------------------------------------
+
+const CLIP_POLICY = /\b(clip(s|ping|per|pers)?|re-?upload(s|ing)?|repost(s|ing)?|copyright|fair use|dmca|content id)\b/i;
+
+/** The sentences/lines of a bio that talk about clipping, joined; null if none. */
+function clipExcerpt(bio: string): string | null {
+  const parts = bio
+    .split(/\r?\n|(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s && CLIP_POLICY.test(s));
+  if (parts.length === 0) return null;
+  const text = parts.slice(0, 3).join(" … ");
+  return text.length > 400 ? `${text.slice(0, 397)}…` : text;
+}
+
+export async function scanCreatorBiosAction(): Promise<ActionResult<{ scanned: number; mentions: number; failed: string[] }>> {
+  try {
+    const { sb } = await requireUser();
+    const { data: creators, error } = await sb
+      .from("creators")
+      .select("id, platform, external_creator_id, name")
+      .in("platform", ["twitch", "youtube"]);
+    if (error) throw new Error(`Loading creators failed: ${error.message}`);
+
+    const bios = new Map<string, string>(); // creator id -> bio
+    const failed: string[] = [];
+
+    const twitch = creators.filter((c) => c.platform === "twitch");
+    if (twitch.length && twitchConfigured()) {
+      try {
+        const users = await getUsersByLogin(twitch.map((c) => c.external_creator_id));
+        for (const c of twitch) {
+          const u = users.find((x) => x.login === c.external_creator_id);
+          if (u) bios.set(c.id, u.description ?? "");
+        }
+      } catch (err) {
+        failed.push(`Twitch: ${err instanceof Error ? err.message : "failed"}`);
+      }
+    }
+
+    // YouTube creators found via discovery/channel monitoring use the channel id (UC…)
+    const youtube = creators.filter((c) => c.platform === "youtube" && /^UC[\w-]{22}$/.test(c.external_creator_id));
+    if (youtube.length && youtubeConfigured()) {
+      try {
+        for (let i = 0; i < youtube.length; i += 50) {
+          const batch = youtube.slice(i, i + 50);
+          const channels = await getChannelsById(batch.map((c) => c.external_creator_id));
+          for (const c of batch) {
+            const ch = channels.find((x) => x.id === c.external_creator_id);
+            if (ch) bios.set(c.id, ch.description);
+          }
+        }
+      } catch (err) {
+        failed.push(`YouTube: ${err instanceof Error ? err.message : "failed"}`);
+      }
+    }
+
+    const now = new Date().toISOString();
+    let mentions = 0;
+    for (const [id, bio] of bios) {
+      const excerpt = clipExcerpt(bio);
+      if (excerpt) mentions++;
+      const { error: upErr } = await sb.from("creators").update({ bio_clip_excerpt: excerpt, bio_checked_at: now }).eq("id", id);
+      if (upErr) throw new Error(`Saving scan results failed: ${upErr.message}`);
+    }
+    revalidatePath("/creators");
+    return { ok: true, data: { scanned: bios.size, mentions, failed } };
+  } catch (err) {
+    return fail(err);
+  }
+}
