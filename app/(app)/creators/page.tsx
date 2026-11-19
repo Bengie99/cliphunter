@@ -4,6 +4,7 @@ import { PlatformBadge, ScoreBadge } from "@/components/clips/badges";
 import { PageHeader } from "@/components/layout/page-header";
 import { AddStreamersForm } from "@/components/discovery/add-streamers-form";
 import { MonitorToggle } from "@/components/discovery/monitor-toggle";
+import { PermissionDialog } from "@/components/discovery/permission-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRepository } from "@/lib/data";
 import { getDataMode } from "@/lib/env";
@@ -18,27 +19,37 @@ export default async function CreatorsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Streamers & Creators"
-        description="Monitored Twitch streamers are checked for new clips on every discovery run. Click a badge to switch monitoring on or off."
+        description="Monitored channels are checked for new clips on every discovery run. Click a Monitoring badge to switch it on or off, and a Permission badge to record a creator's permission to clip."
       />
       {canMonitor && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Monitor Twitch streamers</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AddStreamersForm />
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Monitor Twitch streamers</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AddStreamersForm platform="twitch" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Monitor YouTube channels</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AddStreamersForm platform="youtube" />
+            </CardContent>
+          </Card>
+        </div>
       )}
       {creators.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-center">
           <Users className="mb-3 size-8 text-muted-foreground" />
           <p className="font-medium">No creators yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">Add Twitch streamers above, or add a clip with a creator name.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Add Twitch streamers or YouTube channels above, or add a clip with a creator name.</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border bg-card">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-2.5 font-medium">Creator</th>
@@ -47,6 +58,7 @@ export default async function CreatorsPage() {
                 <th className="px-4 py-2.5 text-right font-medium">Clips</th>
                 <th className="px-4 py-2.5 font-medium">Avg. score</th>
                 <th className="px-4 py-2.5 font-medium">Monitoring</th>
+                <th className="px-4 py-2.5 font-medium">Permission</th>
                 <th className="px-4 py-2.5 font-medium">Added</th>
               </tr>
             </thead>
@@ -72,7 +84,10 @@ export default async function CreatorsPage() {
                     <ScoreBadge score={c.avg_viral_score} />
                   </td>
                   <td className="px-4 py-2.5">
-                    <MonitorToggle creatorId={c.id} monitored={c.is_monitored} enabled={canMonitor && c.platform === "twitch"} />
+                    <MonitorToggle creatorId={c.id} monitored={c.is_monitored} enabled={canMonitor && (c.platform === "twitch" || c.platform === "youtube")} />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <PermissionDialog creator={c} editable={canMonitor} />
                   </td>
                   <td className="px-4 py-2.5 text-muted-foreground">{formatDate(c.created_at)}</td>
                 </tr>

@@ -1,10 +1,18 @@
 import Link from "next/link";
 import { PlatformBadge } from "@/components/clips/badges";
-import { TwitchSettingsForm } from "@/components/discovery/twitch-settings-form";
+import { DiscoverySettingsForm } from "@/components/discovery/discovery-settings-form";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getTwitchSettings, listRecentRuns, TWITCH_DEFAULTS, type DiscoveryRun } from "@/lib/discovery/settings";
+import {
+  DEFAULTS,
+  DISCOVERY_PLATFORMS,
+  getSettings,
+  listRecentRuns,
+  type DiscoveryPlatform,
+  type DiscoveryRun,
+  type DiscoverySettings,
+} from "@/lib/discovery/settings";
 import { getDataMode, integrationEnvStatus } from "@/lib/env";
 import { formatDateTime, timeAgo } from "@/lib/format";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -25,8 +33,8 @@ const PLATFORM_NOTES: { platform: Platform; api: string; envKeys: string; status
     platform: "youtube",
     api: "YouTube Data API v3 (official)",
     envKeys: "YOUTUBE_API_KEY",
-    status: "Next",
-    notes: "Channel monitoring is cheap (1 unit/call). Keyword search costs 100 of the 10,000 daily units, so it runs a few times a day.",
+    status: "Live",
+    notes: "Monitored channels' uploads (1 quota unit each) plus keyword searches every 6h (100 units each) out of 10,000/day. No Shorts flag in the API: up to 3 min is linked as a Short.",
   },
   {
     platform: "kick",
@@ -58,27 +66,33 @@ const RUN_BADGE: Record<DiscoveryRun["status"], { label: string; variant: "succe
   running: { label: "Running", variant: "outline" },
 };
 
+const ENV_NEEDED: Record<DiscoveryPlatform, (env: ReturnType<typeof integrationEnvStatus>) => string[]> = {
+  twitch: (env) => (env.twitch ? [] : ["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"]),
+  youtube: (env) => (env.youtube ? [] : ["YOUTUBE_API_KEY"]),
+};
+
 export default async function IntegrationsPage() {
   const env = integrationEnvStatus();
   const supabaseMode = getDataMode() === "supabase";
 
-  let settings = null;
+  const settings: Partial<Record<DiscoveryPlatform, DiscoverySettings | null>> = {};
   let runs: DiscoveryRun[] = [];
   let loadError: string | null = null;
   if (supabaseMode) {
     try {
       const sb = createSupabaseServerClient();
-      [settings, runs] = await Promise.all([getTwitchSettings(sb), listRecentRuns(sb, 10)]);
+      const [tw, yt, r] = await Promise.all([getSettings(sb, "twitch"), getSettings(sb, "youtube"), listRecentRuns(sb, 15)]);
+      settings.twitch = tw;
+      settings.youtube = yt;
+      runs = r;
     } catch (err) {
       loadError = err instanceof Error ? err.message : "Failed to load discovery data";
     }
   }
 
-  const missing = [
-    !env.twitch && "TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET",
-    !env.supabaseServiceRole && "SUPABASE_SERVICE_ROLE_KEY",
-    !process.env.CRON_SECRET && "CRON_SECRET",
-  ].filter(Boolean) as string[];
+  const sharedMissing = [!env.supabaseServiceRole && "SUPABASE_SERVICE_ROLE_KEY", !process.env.CRON_SECRET && "CRON_SECRET"].filter(
+    Boolean,
+  ) as string[];
 
   return (
     <div className="space-y-5">
@@ -93,32 +107,44 @@ export default async function IntegrationsPage() {
         </Card>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <PlatformBadge platform="twitch" /> Twitch discovery
-              </CardTitle>
-              {settings?.discovery_enabled ? <Badge variant="success">On</Badge> : <Badge variant="outline">Off</Badge>}
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {missing.length > 0 && (
-                <p className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                  Missing environment variables in Vercel: <span className="font-mono">{missing.join(", ")}</span>. Add them and redeploy.
-                </p>
-              )}
-              {loadError && (
-                <p className="rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                  {loadError}. Has the <span className="font-mono">20261119000000_discovery.sql</span> migration been run?
-                </p>
-              )}
-              <TwitchSettingsForm initial={settings ?? TWITCH_DEFAULTS} saved={Boolean(settings)} />
-              <p className="text-xs text-muted-foreground">
-                Streamers to watch are managed on the <Link className="underline hover:text-foreground" href="/creators">Creators</Link> page.
+          <div className="space-y-4">
+            {loadError && (
+              <p className="rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {loadError}. Have all migrations in <span className="font-mono">supabase/migrations</span> been run?
               </p>
-            </CardContent>
-          </Card>
+            )}
+            {DISCOVERY_PLATFORMS.map((platform) => {
+              const s = settings[platform];
+              const missing = [...ENV_NEEDED[platform](env), ...sharedMissing];
+              return (
+                <Card key={platform}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <PlatformBadge platform={platform} /> {platform === "twitch" ? "Twitch" : "YouTube"} discovery
+                    </CardTitle>
+                    {s?.discovery_enabled ? <Badge variant="success">On</Badge> : <Badge variant="outline">Off</Badge>}
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {missing.length > 0 && (
+                      <p className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                        Missing environment variables in Vercel: <span className="font-mono">{missing.join(", ")}</span>. Add them and redeploy.
+                      </p>
+                    )}
+                    <DiscoverySettingsForm platform={platform} initial={s ?? DEFAULTS[platform]} saved={Boolean(s)} />
+                    <p className="text-xs text-muted-foreground">
+                      Channels to watch are managed on the{" "}
+                      <Link className="underline hover:text-foreground" href="/creators">
+                        Creators
+                      </Link>{" "}
+                      page.
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
 
-          <Card>
+          <Card className="self-start">
             <CardHeader>
               <CardTitle>Recent runs</CardTitle>
             </CardHeader>
@@ -131,6 +157,7 @@ export default async function IntegrationsPage() {
                     <li key={r.id} className="border-b pb-3 text-xs last:border-b-0 last:pb-0">
                       <div className="flex items-center justify-between gap-2">
                         <span className="flex items-center gap-2">
+                          <PlatformBadge platform={r.platform} />
                           <Badge variant={RUN_BADGE[r.status].variant}>{RUN_BADGE[r.status].label}</Badge>
                           <span title={formatDateTime(r.started_at)}>{timeAgo(r.started_at)}</span>
                           <span className="text-muted-foreground">{r.trigger === "manual" ? "manual" : "scheduled"}</span>

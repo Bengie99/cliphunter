@@ -283,7 +283,8 @@ export class SupabaseRepository implements ClipRepository {
   async listCreators(): Promise<CreatorWithStats[]> {
     const { data, error } = await this.sb
       .from("creators")
-      .select("id, platform, external_creator_id, name, profile_url, profile_image, category, is_monitored, created_at, clips(viral_score)")
+      .select("id, platform, external_creator_id, name, profile_url, profile_image, category, is_monitored, created_at, " +
+          "permission_status, permission_proof_url, permission_granted_at, permission_notes, clips(viral_score)")
       .order("name");
     if (error) fail("Loading creators failed", error);
     return (data as unknown as (CreatorWithStats & { clips: { viral_score: number | null }[] })[])

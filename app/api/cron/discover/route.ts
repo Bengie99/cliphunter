@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
-import { runScheduledTwitchDiscovery } from "@/lib/discovery/twitch-discovery";
+import { runScheduledDiscovery } from "@/lib/discovery/scheduler";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -23,10 +23,10 @@ function authorized(req: NextRequest) {
 async function handle(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
-    const results = await runScheduledTwitchDiscovery(createSupabaseAdminClient());
+    const results = await runScheduledDiscovery(createSupabaseAdminClient());
     return NextResponse.json({
       ok: true,
-      twitch: results.map(({ status, seen, added, updated, messages }) => ({ status, seen, added, updated, messages })),
+      runs: results.map(({ platform, status, seen, added, updated, messages }) => ({ platform, status, seen, added, updated, messages })),
     });
   } catch (err) {
     console.error("[cliphunter] scheduled discovery failed:", err);

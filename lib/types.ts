@@ -45,6 +45,10 @@ export type DownloadStatus = (typeof DOWNLOAD_STATUSES)[number];
 
 export type ClipSource = "manual" | "discovery";
 
+/** Whether a creator has allowed us to clip/republish their content (with proof on file). */
+export const PERMISSION_STATUSES = ["none", "requested", "granted", "denied"] as const;
+export type PermissionStatus = (typeof PERMISSION_STATUSES)[number];
+
 export interface Creator {
   id: string;
   platform: Platform;
@@ -55,6 +59,11 @@ export interface Creator {
   category: string | null;
   is_monitored: boolean;
   created_at: string;
+  // Supabase only (absent in demo mode)
+  permission_status?: PermissionStatus;
+  permission_proof_url?: string | null;
+  permission_granted_at?: string | null;
+  permission_notes?: string | null;
 }
 
 export interface CreatorWithStats extends Creator {
