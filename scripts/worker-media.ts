@@ -54,6 +54,7 @@ export async function initMedia(sb: SupabaseClient, workspaceId: string, userId:
     }
   }
   await sb.from("file_requests").update({ status: "queued" }).eq("status", "uploading");
+  prepareRenderer().catch((e) => log(`⚠ Couldn't prepare the renderer yet (will retry on the first render): ${errMsg(e)}`));
 }
 
 /** The clip's newest file was downloaded by this person and exists on this PC. */
@@ -286,6 +287,9 @@ async function analyzeTask(): Promise<boolean> {
       language: "auto",
       splitOnWord: true, // whole words with punctuation attached, not sub-word tokens
       printOutput: false,
+      // whisper.cpp defaults to 4 threads and a 5-wide beam search; greedy decoding on
+      // every physical core is noticeably faster and plenty accurate for subtitles
+      additionalArgs: ["--threads", String(WORK_THREADS), "--beam-size", "1"],
     });
     const words: Word[] = toCaptions({ whisperCppOutput: output })
       .captions.map((c) => ({ text: c.text.trim(), startMs: Math.round(c.startMs), endMs: Math.round(c.endMs) }))
@@ -306,7 +310,35 @@ async function analyzeTask(): Promise<boolean> {
 // 3. render (Remotion) + audio finishing + cover
 // ---------------------------------------------------------------------------
 
-let bundleUrl: string | null = null;
+/**
+ * One thread per physical core (os.cpus() counts hyper-threads). Going past that
+ * makes whisper.cpp much SLOWER: 12 threads took 72 s vs 31 s with 6 on an i5-11400F.
+ */
+const WORK_THREADS = Math.max(2, Math.floor(os.cpus().length / 2));
+/** Draw frames on the graphics card — software drawing of the blur/zoom layers is what made renders crawl. */
+const chromiumOptions = { gl: "angle" as const };
+
+let bundlePromise: Promise<string> | null = null;
+
+/**
+ * Downloads the renderer's browser and bundles the composition — once, and right
+ * when the helper starts, so the first render doesn't spend minutes at 0 %.
+ */
+export function prepareRenderer(): Promise<string> {
+  bundlePromise ??= (async () => {
+    const { ensureBrowser } = await import("@remotion/renderer");
+    await ensureBrowser();
+    // The packaged ClipHunter Helper ships a pre-built bundle (and no bundler); from the code we build it.
+    const prebuilt = env("CLIPHUNTER_REMOTION_BUNDLE");
+    if (prebuilt) return prebuilt;
+    const { bundle } = await import("@remotion/bundler");
+    return bundle({ entryPoint: path.join(process.cwd(), "remotion", "index.ts") });
+  })().catch((e) => {
+    bundlePromise = null; // try again on the next render
+    throw e;
+  });
+  return bundlePromise;
+}
 
 /** Tiny local server so the renderer's browser can read local files (by token only). */
 const served = new Map<string, string>();
@@ -399,18 +431,8 @@ async function renderTask(): Promise<boolean> {
     setActivity(`Rendering "${short(clip?.title ?? job.clip_id, 40)}"`);
     log(`▶ Rendering "${short(clip?.title ?? job.clip_id)}"`);
 
-    const { ensureBrowser, renderMedia, renderStill, selectComposition } = await import("@remotion/renderer");
-    if (!bundleUrl) {
-      log("  preparing renderer (first render only)…");
-      await ensureBrowser();
-      // The packaged ClipHunter Helper ships a pre-built bundle (and no bundler); from the code we build it.
-      const prebuilt = env("CLIPHUNTER_REMOTION_BUNDLE");
-      if (prebuilt) bundleUrl = prebuilt;
-      else {
-        const { bundle } = await import("@remotion/bundler");
-        bundleUrl = await bundle({ entryPoint: path.join(process.cwd(), "remotion", "index.ts") });
-      }
-    }
+    const { renderMedia, renderStill, selectComposition } = await import("@remotion/renderer");
+    const bundleUrl = await prepareRenderer();
 
     let source = file;
     if (spec.audio.denoise) {
@@ -434,7 +456,7 @@ async function renderTask(): Promise<boolean> {
     }
 
     const inputProps = { spec, videoSrc, assetUrls };
-    const composition = await selectComposition({ serveUrl: bundleUrl, id: "Short", inputProps });
+    const composition = await selectComposition({ serveUrl: bundleUrl, id: "Short", inputProps, chromiumOptions });
     const safeTitle = (clip?.title ?? "short").replace(/[^\w-]+/g, "_").slice(0, 50);
     const out = path.join(RENDER_DIR, `${safeTitle}_${job.clip_id.slice(0, 8)}.mp4`);
 
@@ -447,10 +469,11 @@ async function renderTask(): Promise<boolean> {
       outputLocation: out,
       inputProps,
       concurrency: Math.max(1, Math.floor(os.cpus().length / 2)),
+      chromiumOptions,
       onProgress: ({ progress }) => {
         // the last 10% is kept for loudness + cover
         const p = progress * 0.9;
-        if (p - lastSaved >= 0.05) {
+        if (p - lastSaved >= 0.02) {
           lastSaved = p;
           void sb.from("clip_edits").update({ render_progress: p }).eq("id", job.id);
         }
@@ -466,7 +489,7 @@ async function renderTask(): Promise<boolean> {
     if (spec.cover.t != null) {
       const frame = Math.min(Math.max(0, Math.round(spec.cover.t * FPS)), Math.round(outputDuration(spec) * FPS) - 1);
       const jpg = out.replace(/\.mp4$/, ".jpg");
-      await renderStill({ composition, serveUrl: bundleUrl, inputProps, frame, output: jpg, imageFormat: "jpeg", jpegQuality: 90 });
+      await renderStill({ composition, serveUrl: bundleUrl, inputProps, chromiumOptions, frame, output: jpg, imageFormat: "jpeg", jpegQuality: 90 });
       const storagePath = `${workspaceId}/covers/${job.clip_id}.jpg`;
       const { error } = await sb.storage.from("media").upload(storagePath, fs.readFileSync(jpg), { contentType: "image/jpeg", upsert: true });
       if (!error) coverPath = storagePath;
