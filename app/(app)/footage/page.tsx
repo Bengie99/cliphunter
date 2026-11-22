@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { HardDrive } from "lucide-react";
 import { PlatformBadge } from "@/components/clips/badges";
-import { CopyPathButton } from "@/components/footage/copy-path-button";
+import { HelperStatus } from "@/components/editor/helper-status";
+import { FootageTable } from "@/components/footage/footage-table";
+import { AutoRefresh } from "@/components/editor/auto-refresh";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDataMode } from "@/lib/env";
-import { formatDateTime, formatDuration, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Platform } from "@/lib/types";
 
@@ -68,17 +70,23 @@ export default async function FootagePage() {
       .order("download_requested_at", { ascending: true })
       .limit(100),
   ]);
-  const loadError = files.error?.message ?? queue.error?.message;
   const fileRows = (files.data ?? []) as unknown as FileRow[];
   const queueRows = (queue.data ?? []) as QueueRow[];
-  const totalSize = fileRows.reduce((s, f) => s + (f.file_size ?? 0), 0);
+  const clipIds = fileRows.map((f) => f.clips?.id).filter((x): x is string => Boolean(x));
+  const editsRes = clipIds.length
+    ? await sb.from("clip_edits").select("clip_id, render_status, render_progress, transcript_status").in("clip_id", clipIds)
+    : { data: [], error: null };
+  const edits = new Map((editsRes.data ?? []).map((e) => [e.clip_id as string, e]));
+  const loadError = files.error?.message ?? queue.error?.message ?? editsRes.error?.message;
+  const working = (editsRes.data ?? []).some((e) => ["queued", "running"].includes(e.render_status) || ["queued", "running"].includes(e.transcript_status));
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Downloaded Footage"
-        description="Clips you queued with the Download button are saved on your PC by the download helper. Clips without creator permission are marked Transformative use."
+        description="Clips you queued with the Download button are saved on your PC by the background helper. Save MP4 downloads a copy in this browser. Clips without creator permission are marked Transformative use."
       />
+      {working && <AutoRefresh seconds={6} />}
 
       {loadError && (
         <p className="rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -89,9 +97,7 @@ export default async function FootagePage() {
       <Card>
         <CardHeader>
           <CardTitle>Queue</CardTitle>
-          <span className="text-xs text-muted-foreground">
-            Helper: run <code className="rounded bg-secondary px-1">npm run worker</code> in the project folder
-          </span>
+          <HelperStatus />
         </CardHeader>
         <CardContent>
           {queueRows.length === 0 ? (
@@ -119,7 +125,9 @@ export default async function FootagePage() {
             </ul>
           )}
           {queueRows.some((q) => q.download_status === "queued") && (
-            <p className="mt-3 text-[11px] text-muted-foreground">Items stuck on Queued? The helper isn&apos;t running — start it on your PC.</p>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              Items stuck on Queued? The helper of the person who clicked Download isn&apos;t running — start “ClipHunter Helper” on that PC.
+            </p>
           )}
         </CardContent>
       </Card>
@@ -131,69 +139,23 @@ export default async function FootagePage() {
           <p className="mt-1 text-sm text-muted-foreground">Downloaded clips will appear here.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border bg-card">
-          <div className="flex items-center justify-between border-b px-4 py-2.5 text-xs text-muted-foreground">
-            <span>
-              {fileRows.length} file{fileRows.length === 1 ? "" : "s"}
-            </span>
-            <span>{mb(totalSize)} on disk</span>
-          </div>
-          <table className="w-full min-w-[760px] text-sm">
-            <thead>
-              <tr className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-2.5 font-medium">Clip</th>
-                <th className="px-4 py-2.5 font-medium">Length</th>
-                <th className="px-4 py-2.5 font-medium">Resolution</th>
-                <th className="px-4 py-2.5 font-medium">Size</th>
-                <th className="px-4 py-2.5 font-medium">Downloaded</th>
-                <th className="px-4 py-2.5 font-medium">File on your PC</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fileRows.map((f) => (
-                <tr key={f.id} className="border-b align-top last:border-b-0">
-                  <td className="px-4 py-2.5">
-                    {f.clips ? (
-                      <>
-                        <div className="flex items-center gap-2">
-                          <PlatformBadge platform={f.clips.platform} />
-                          <Link href={`/clips?q=${encodeURIComponent(f.clips.title.slice(0, 60))}`} className="font-medium hover:text-violet-300">
-                            {f.clips.title}
-                          </Link>
-                        </div>
-                        {f.clips.creator_name && <div className="mt-0.5 text-xs text-muted-foreground">{f.clips.creator_name}</div>}
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">{f.file_name}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 tabular-nums">{formatDuration(f.duration_seconds)}</td>
-                  <td className="px-4 py-2.5 tabular-nums">{f.resolution ?? "—"}</td>
-                  <td className="px-4 py-2.5 tabular-nums">{mb(f.file_size)}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground" title={formatDateTime(f.downloaded_at)}>
-                    {f.downloaded_at ? timeAgo(f.downloaded_at) : "—"}
-                  </td>
-                  <td className="max-w-[280px] px-4 py-2.5">
-                    <div className="flex items-center gap-1">
-                      <code className="truncate text-[11px] text-muted-foreground" title={f.file_path}>
-                        {f.file_name}
-                      </code>
-                      <CopyPathButton path={f.file_path} />
-                      {f.clips && (
-                        <Link
-                          href={`/editor/${f.clips.id}`}
-                          className="ml-1 inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                        >
-                          Edit
-                        </Link>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <FootageTable
+          rows={fileRows.map((f) => {
+            const e = f.clips ? edits.get(f.clips.id) : undefined;
+            return {
+              id: f.id,
+              file_name: f.file_name,
+              file_path: f.file_path,
+              file_size: f.file_size,
+              duration_seconds: f.duration_seconds,
+              resolution: f.resolution,
+              downloaded_at: f.downloaded_at,
+              clip: f.clips ? { id: f.clips.id, title: f.clips.title, creator_name: f.clips.creator_name, platform: f.clips.platform } : null,
+              render: e && e.render_status !== "none" ? { status: e.render_status, progress: e.render_progress } : null,
+              analysis: e?.transcript_status ?? null,
+            };
+          })}
+        />
       )}
     </div>
   );

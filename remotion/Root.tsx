@@ -12,7 +12,7 @@ export const RemotionRoot: React.FC = () => (
     height={OUT_H}
     fps={FPS}
     durationInFrames={300}
-    defaultProps={{ spec: defaultSpec({ duration: 10, width: 1920, height: 1080 }), videoSrc: "", audioUrls: {} } satisfies ShortProps}
+    defaultProps={{ spec: defaultSpec({ duration: 10, width: 1920, height: 1080 }), videoSrc: "", assetUrls: {} } satisfies ShortProps}
     calculateMetadata={({ props }) => ({ durationInFrames: durationInFrames(props.spec) })}
   />
 );

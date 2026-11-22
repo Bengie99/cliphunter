@@ -5,12 +5,15 @@
  *   npm run build:helper      ->  dist/ClipHunter Helper.zip
  *
  * Contents:
- *   Start ClipHunter Helper.cmd   double-click to run (asks for the app login once)
+ *   ClipHunter Helper.vbs         double-click: runs in the background (tray icon),
+ *                                 starts with Windows, asks for the app login once
+ *   Run in a window.cmd           same helper in a console window (troubleshooting)
  *   Sign out.cmd                  forget the saved login on this PC
  *   README.txt
  *   node/node.exe                 portable Node.js LTS
  *   bin/yt-dlp.exe                downloader (ffmpeg/ffprobe come with Remotion's renderer)
  *   app/helper.cjs                the helper (scripts/worker.ts bundled with esbuild)
+ *   app/tray.ps1                  the tray app (scripts/helper-tray.ps1)
  *   app/remotion-bundle/          pre-built Shorts composition for rendering
  *   app/node_modules/             only the renderer + speech-to-text packages
  *   app/config.json               public Supabase URL + anon key (RLS protects the data)
@@ -36,6 +39,8 @@ const readEnv = (k) => process.env[k] || envFile.match(new RegExp(`^\\s*${k}\\s*
 const SUPABASE_URL = readEnv("NEXT_PUBLIC_SUPABASE_URL");
 const SUPABASE_ANON = readEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
 if (!SUPABASE_URL || !SUPABASE_ANON) throw new Error("NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY must be in .env.local");
+// the website the tray icon opens
+const APP_URL = readEnv("CLIPHUNTER_APP_URL") || "https://cliphunter-six.vercel.app";
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 const versionOf = (name) => {
@@ -86,7 +91,7 @@ if (!fs.existsSync(path.join(compositorDir, "ffmpeg.exe"))) throw new Error("Rem
 
 fs.writeFileSync(
   path.join(APP, "config.json"),
-  JSON.stringify({ NEXT_PUBLIC_SUPABASE_URL: SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY: SUPABASE_ANON }, null, 2),
+  JSON.stringify({ NEXT_PUBLIC_SUPABASE_URL: SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY: SUPABASE_ANON, CLIPHUNTER_APP_URL: APP_URL }, null, 2),
 );
 
 // --- 4. portable Node.js (latest LTS, cached) --------------------------------
@@ -115,11 +120,22 @@ const ytdlp = where.stdout?.split(/\r?\n/).find((l) => l.toLowerCase().endsWith(
 if (!ytdlp) throw new Error("yt-dlp.exe not found on PATH — winget install yt-dlp.yt-dlp, then open a new terminal");
 fs.copyFileSync(ytdlp.trim(), path.join(OUT, "bin", "yt-dlp.exe"));
 
-// --- 6. launcher + readme ----------------------------------------------------
-step("Writing launcher");
+// --- 6. launchers + readme ---------------------------------------------------
+step("Writing launchers");
 const crlf = (s) => s.replace(/\r?\n/g, "\r\n");
+const tray = fs.readFileSync(path.join(ROOT, "scripts", "helper-tray.ps1"), "utf8");
+if (/[^\x00-\x7f]/.test(tray)) throw new Error("scripts/helper-tray.ps1 must be ASCII-only (PowerShell 5.1 reads it as ANSI)");
+fs.writeFileSync(path.join(APP, "tray.ps1"), crlf(tray));
 fs.writeFileSync(
-  path.join(OUT, "Start ClipHunter Helper.cmd"),
+  path.join(OUT, "ClipHunter Helper.vbs"),
+  crlf(`' Starts ClipHunter Helper in the background (tray icon near the clock).
+Set fso = CreateObject("Scripting.FileSystemObject")
+dir = fso.GetParentFolderName(WScript.ScriptFullName)
+CreateObject("WScript.Shell").Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File """ & dir & "\\app\\tray.ps1""", 0, False
+`),
+);
+fs.writeFileSync(
+  path.join(OUT, "Run in a window.cmd"),
   crlf(`@echo off
 chcp 65001 >nul
 title ClipHunter Helper
@@ -141,13 +157,27 @@ fs.writeFileSync(
 =================
 
 The helper does the heavy work for the ClipHunter website on YOUR PC:
-downloads, editor previews, subtitles and rendering Shorts.
+downloads, editor previews, subtitles, audio analysis and rendering Shorts.
+It runs in the background - no window to keep open.
 
-START
-  Double-click "Start ClipHunter Helper".
-  The first time, sign in with your ClipHunter email and password
-  (the same as the website). You stay signed in after that.
-  Keep the window open while you work; close it to stop.
+START (once)
+  1. Unzip this folder somewhere permanent, e.g. Documents\\ClipHunter Helper
+     (not Downloads, and don't move it afterwards - Windows starts it from here).
+  2. Double-click "ClipHunter Helper".
+  3. A window asks for your ClipHunter email and password once (the same
+     as the website). After that it closes and the helper keeps working.
+
+  A purple "C" icon appears near the clock (click the ^ arrow if hidden).
+  It starts by itself with Windows. Right-click it for:
+    Open ClipHunter, Open footage folder, View activity log,
+    Restart, Sign in / switch account, Start with Windows (on/off), Quit.
+  Orange icon = it needs you (sign-in) or is restarting after an error.
+
+  The website shows whether your helper is online (Downloaded Footage page).
+
+TROUBLESHOOTING
+  "Run in a window" starts the same helper with a visible console.
+  Quit the tray icon first. The activity log is in %APPDATA%\\ClipHunter\\helper.log
 
 WHERE ARE MY FILES?
   Videos > ClipHunter          (C:\\Users\\<you>\\Videos\\ClipHunter)
@@ -165,7 +195,8 @@ SIGN OUT
   Double-click "Sign out".
 
 WINDOWS SMARTSCREEN
-  If Windows warns about an unknown app, click "More info" > "Run anyway".
+  If Windows warns about an unknown app or script, click "More info" > "Run anyway"
+  (or "Open"). It only asks the first time.
 `),
 );
 

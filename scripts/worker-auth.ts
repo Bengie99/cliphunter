@@ -5,6 +5,9 @@
  * - ClipHunter Helper (packaged): asks for email + password once in the window,
  *   then keeps only the refresh token in %APPDATA%\ClipHunter\session.json
  *   (never the password). Start with --logout to forget it.
+ * - Background mode (--background, started hidden by the tray app): never
+ *   prompts; exits with code 2 when a sign-in is needed, so the tray can open
+ *   a visible sign-in window (--signin: sign in, save, exit).
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -53,6 +56,11 @@ function askHidden(question: string): Promise<string> {
   });
 }
 
+/** Exit code the tray app reads as "please sign in". */
+export const NEEDS_SIGNIN = 2;
+const BACKGROUND = process.argv.includes("--background");
+const SIGNIN_ONLY = process.argv.includes("--signin");
+
 export async function signIn(): Promise<{ sb: SupabaseClient; userId: string; email: string }> {
   const url = env("NEXT_PUBLIC_SUPABASE_URL");
   const anon = env("NEXT_PUBLIC_SUPABASE_ANON_KEY");
@@ -78,7 +86,7 @@ export async function signIn(): Promise<{ sb: SupabaseClient; userId: string; em
     if (session?.refresh_token) saveRefreshToken(session.refresh_token);
   });
 
-  if (fs.existsSync(SESSION_FILE)) {
+  if (fs.existsSync(SESSION_FILE) && !SIGNIN_ONLY) {
     try {
       const { refresh_token } = JSON.parse(fs.readFileSync(SESSION_FILE, "utf8")) as { refresh_token: string };
       const { data, error } = await sb.auth.refreshSession({ refresh_token });
@@ -89,6 +97,11 @@ export async function signIn(): Promise<{ sb: SupabaseClient; userId: string; em
     log("Your saved sign-in expired — please sign in again.");
   }
 
+  if (BACKGROUND) {
+    log("Not signed in — waiting for you to sign in from the tray icon.");
+    process.exit(NEEDS_SIGNIN);
+  }
+
   console.log("Sign in with your ClipHunter account (the same login as the website).\n");
   for (let attempt = 0; attempt < 3; attempt++) {
     const email = await ask("Email: ");
@@ -97,6 +110,11 @@ export async function signIn(): Promise<{ sb: SupabaseClient; userId: string; em
     if (!error && data.user && data.session) {
       saveRefreshToken(data.session.refresh_token);
       console.log("");
+      if (SIGNIN_ONLY) {
+        console.log("✔ Signed in. ClipHunter Helper keeps running in the background (tray icon).");
+        await new Promise((r) => setTimeout(r, 2500));
+        process.exit(0);
+      }
       return { sb, userId: data.user.id, email: data.user.email ?? email };
     }
     console.log(`  ✖ ${error?.message ?? "Sign-in failed"} — try again.\n`);

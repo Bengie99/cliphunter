@@ -8,7 +8,7 @@ import * as z4 from "zod/v4";
 import { getDataMode } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getWorkspaceId } from "@/lib/supabase/workspace";
-import type { EditSpec } from "@/remotion/spec";
+import { applyPreset, defaultSpec, upgradeSpec, type EditSpec, type PresetSettings } from "@/remotion/spec";
 import type { ActionResult } from "./actions";
 
 async function requireUser() {
@@ -28,36 +28,83 @@ const fail = (err: unknown): { ok: false; error: string } => {
 };
 
 const uuid = z.string().uuid();
+type AssetKind = "music" | "sfx" | "image" | "video";
 const n = (min: number, max: number) => z.number().finite().min(min).max(max);
 
+const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const wordSchema = z.object({
+  text: z.string().max(100),
+  startMs: n(0, 36_000_000),
+  endMs: n(0, 36_000_000),
+  emph: z.boolean().optional(),
+  emoji: z.string().max(16).optional(),
+  censor: z.boolean().optional(),
+});
+
 const specSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   sourceDuration: n(0, 36_000),
   sourceWidth: n(1, 10_000),
   sourceHeight: n(1, 10_000),
-  segments: z.array(z.object({ start: n(0, 36_000), end: n(0, 36_000) })).min(1).max(200),
+  segments: z.array(z.object({ start: n(0, 36_000), end: n(0, 36_000) })).min(1).max(500),
   layout: z.object({
     mode: z.enum(["crop", "blur", "split"]),
     cropX: n(0, 1),
     cam: z.object({ x: n(0, 1), y: n(0, 1), w: n(0.02, 1), h: n(0.02, 1) }),
     camHeight: n(0.15, 0.7),
+    follow: z.boolean(),
+    track: z.array(z.object({ t: n(0, 36_000), x: n(0, 1), y: n(0, 1) })).max(20_000),
   }),
   captions: z.object({
     enabled: z.boolean(),
-    words: z.array(z.object({ text: z.string().max(100), startMs: n(0, 36_000_000), endMs: n(0, 36_000_000) })).max(5000),
+    words: z.array(wordSchema).max(5000),
     y: n(0, 1),
     size: n(20, 200),
-    highlight: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    style: z.enum(["pop", "box", "karaoke", "single", "minimal", "neon"]),
+    font: z.enum(["montserrat", "anton", "bebas", "poppins", "bangers", "luckiest", "titan", "inter"]),
+    color: hex,
+    highlight: hex,
     wordsPerLine: z.number().int().min(1).max(8),
     uppercase: z.boolean(),
+    autoEmoji: z.boolean(),
+    emphColor: hex,
+  }),
+  censor: z.object({
+    enabled: z.boolean(),
+    audio: z.enum(["mute", "bleep"]),
+    emoji: z.string().max(16),
+    extra: z.array(z.string().max(40)).max(200),
+  }),
+  zoom: z.object({
+    punches: z.array(z.object({ id: z.string().max(50), t: n(0, 36_000), dur: n(0.1, 30), scale: n(1, 3) })).max(500),
+    slow: z.boolean(),
+    transition: z.enum(["none", "punch", "flash"]),
   }),
   hook: z.object({ text: z.string().max(200), seconds: n(0.5, 30) }),
   credit: z.object({ enabled: z.boolean(), text: z.string().max(120) }),
+  overlays: z
+    .array(
+      z.object({
+        id: z.string().max(50),
+        assetId: uuid,
+        kind: z.enum(["image", "video"]),
+        at: n(0, 36_000),
+        dur: n(0.1, 600),
+        x: n(0, 1),
+        y: n(0, 1),
+        w: n(0.05, 1.5),
+        volume: n(0, 2),
+      }),
+    )
+    .max(100),
   audio: z.object({
     sourceVolume: n(0, 2),
     music: z.object({ assetId: uuid.nullable(), volume: n(0, 1.5), duck: z.boolean() }),
     sfx: z.array(z.object({ id: z.string().max(50), assetId: uuid, at: n(0, 36_000), volume: n(0, 2) })).max(100),
+    normalize: z.boolean(),
+    denoise: z.boolean(),
   }),
+  cover: z.object({ t: n(0, 36_000).nullable() }),
 });
 
 async function upsertEdit(sb: ReturnType<typeof createSupabaseServerClient>, workspaceId: string, clipId: string, fields: Record<string, unknown>) {
@@ -121,9 +168,9 @@ export async function queueRenderAction(clipId: string, spec: EditSpec): Promise
 // audio library
 // ---------------------------------------------------------------------------
 
-export async function registerAudioAssetAction(input: { kind: "music" | "sfx"; name: string; storagePath: string }): Promise<ActionResult<{ id: string }>> {
+export async function registerAudioAssetAction(input: { kind: AssetKind; name: string; storagePath: string }): Promise<ActionResult<{ id: string }>> {
   const p = z
-    .object({ kind: z.enum(["music", "sfx"]), name: z.string().trim().min(1).max(200), storagePath: z.string().min(1).max(500) })
+    .object({ kind: z.enum(["music", "sfx", "image", "video"]), name: z.string().trim().min(1).max(200), storagePath: z.string().min(1).max(500) })
     .safeParse(input);
   if (!p.success) return { ok: false, error: "Invalid audio file" };
   try {
@@ -171,7 +218,8 @@ Return a title, a description and hashtags.
 - Title: punchy and specific to what happens in the clip, under 70 characters, no clickbait lies, at most one emoji, no hashtags.
 - Description: 2-3 short lines about the moment, then a blank line, then exactly the credit line given in the input. Keep it under 600 characters.
 - Hashtags: 5-8 relevant tags without spaces, each starting with #, always including #shorts.
-Base everything only on the input; don't invent events that the transcript and title don't support.`;
+Base everything only on the input; don't invent events that the transcript and title don't support.
+Keep it advertiser-friendly: no profanity or slurs anywhere (the video bleeps them), even if the transcript contains them.`;
 
 export async function generateMetadataAction(clipId: string): Promise<ActionResult<{ title: string; description: string; tags: string[] }>> {
   if (!uuid.safeParse(clipId).success) return { ok: false, error: "Invalid clip" };
@@ -244,6 +292,116 @@ export async function saveMetadataAction(clipId: string, input: { title: string;
     const { sb, workspaceId } = await requireUser();
     await upsertEdit(sb, workspaceId, clipId, { yt_title: p.data.title, yt_description: p.data.description, yt_tags: p.data.tags });
     return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// presets
+// ---------------------------------------------------------------------------
+
+export async function savePresetAction(input: { id?: string; name: string; creatorId: string | null; settings: PresetSettings }): Promise<ActionResult<{ id: string }>> {
+  const p = z
+    .object({ id: uuid.optional(), name: z.string().trim().min(1).max(80), creatorId: uuid.nullable(), settings: z.record(z.unknown()) })
+    .safeParse(input);
+  if (!p.success) return { ok: false, error: "Invalid preset" };
+  if (JSON.stringify(p.data.settings).length > 20_000) return { ok: false, error: "Preset is too large" };
+  try {
+    const { sb } = await requireUser();
+    // a creator has at most one default preset: the new one takes over
+    if (p.data.creatorId) {
+      let q = sb.from("edit_presets").update({ creator_id: null }).eq("creator_id", p.data.creatorId);
+      if (p.data.id) q = q.neq("id", p.data.id);
+      await q;
+    }
+    const row = { name: p.data.name, creator_id: p.data.creatorId, settings: p.data.settings };
+    const { data, error } = p.data.id
+      ? await sb.from("edit_presets").update(row).eq("id", p.data.id).select("id").single()
+      : await sb.from("edit_presets").insert(row).select("id").single();
+    if (error) throw new Error(`Saving the preset failed: ${error.message}`);
+    revalidatePath("/editor", "layout");
+    return { ok: true, data: { id: data.id } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deletePresetAction(id: string): Promise<ActionResult> {
+  if (!uuid.safeParse(id).success) return { ok: false, error: "Invalid preset" };
+  try {
+    const { sb } = await requireUser();
+    const { error } = await sb.from("edit_presets").delete().eq("id", id);
+    if (error) throw new Error(`Deleting the preset failed: ${error.message}`);
+    revalidatePath("/editor", "layout");
+    return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Save MP4 (browser download through the helper)
+// ---------------------------------------------------------------------------
+
+export async function requestFileAction(clipId: string, kind: "source" | "render"): Promise<ActionResult<{ id: string }>> {
+  if (!uuid.safeParse(clipId).success || !["source", "render"].includes(kind)) return { ok: false, error: "Invalid request" };
+  try {
+    const { sb } = await requireUser();
+    const { data, error } = await sb.from("file_requests").insert({ clip_id: clipId, kind }).select("id").single();
+    if (error) throw new Error(`Requesting the file failed: ${error.message}. Has the editor_pro migration been run?`);
+    return { ok: true, data: { id: data.id } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// batch: analyze / render many clips at once
+// ---------------------------------------------------------------------------
+
+export async function batchQueueAction(clipIds: string[], what: "analyze" | "render"): Promise<ActionResult<{ queued: number; skipped: number }>> {
+  const p = z.array(uuid).min(1).max(100).safeParse(clipIds);
+  if (!p.success || !["analyze", "render"].includes(what)) return { ok: false, error: "Invalid request" };
+  try {
+    const { sb, workspaceId } = await requireUser();
+    const [clipsRes, filesRes, editsRes, presetsRes] = await Promise.all([
+      sb.from("clips").select("id, creator_id, creator_name, creator_url").in("id", p.data),
+      sb.from("clip_files").select("clip_id, duration_seconds, resolution, downloaded_at").in("clip_id", p.data).order("downloaded_at", { ascending: false }),
+      sb.from("clip_edits").select("clip_id, spec, transcript_status, render_status").in("clip_id", p.data),
+      sb.from("edit_presets").select("creator_id, settings").not("creator_id", "is", null),
+    ]);
+    const err = clipsRes.error ?? filesRes.error ?? editsRes.error ?? presetsRes.error;
+    if (err) throw new Error(err.message);
+
+    let queued = 0;
+    for (const clip of clipsRes.data ?? []) {
+      const file = filesRes.data?.find((f) => f.clip_id === clip.id);
+      if (!file) continue; // not downloaded
+      const edit = editsRes.data?.find((e) => e.clip_id === clip.id);
+      if (what === "analyze") {
+        if (edit && ["queued", "running"].includes(edit.transcript_status)) continue;
+        await upsertEdit(sb, workspaceId, clip.id, { transcript_status: "queued", transcript_error: null });
+        queued++;
+        continue;
+      }
+      if (edit && ["queued", "running"].includes(edit.render_status)) continue;
+      const [w, h] = (file.resolution ?? "1920x1080").split("x").map(Number);
+      const base = defaultSpec({ duration: Number(file.duration_seconds) || 60, width: w || 1920, height: h || 1080, creatorName: clip.creator_name, creatorUrl: clip.creator_url });
+      let spec = upgradeSpec(edit?.spec, base);
+      // never-opened clips get the creator's default preset
+      const preset = presetsRes.data?.find((x) => x.creator_id === clip.creator_id);
+      if (!edit?.spec || !(edit.spec as { version?: number }).version) {
+        if (preset) spec = applyPreset(spec, preset.settings as PresetSettings);
+      }
+      const v = specSchema.safeParse(spec);
+      if (!v.success) continue;
+      await upsertEdit(sb, workspaceId, clip.id, { spec: v.data, render_status: "queued", render_progress: 0, render_error: null });
+      await sb.from("clips").update({ pipeline_status: "editing" }).eq("id", clip.id).in("pipeline_status", ["downloaded", "ready_for_editing", "edited"]);
+      queued++;
+    }
+    revalidatePath("/", "layout");
+    return { ok: true, data: { queued, skipped: p.data.length - queued } };
   } catch (err) {
     return fail(err);
   }

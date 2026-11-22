@@ -20,14 +20,17 @@
  *   winget install Gyan.FFmpeg
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { signIn } from "./worker-auth";
-import { checkTool, die, FOOTAGE_DIR, log, lowerPriority, probe, run, sha256 } from "./worker-lib";
+import { checkTool, die, FOOTAGE_DIR, getActivity, log, lowerPriority, probe, run, setActivity, sha256, watchActivity } from "./worker-lib";
 import { initMedia, runMediaTask } from "./worker-media";
 
 const POLL_MS = 15_000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+const HEARTBEAT_MS = 30_000;
+const HELPER_VERSION = "2.0.0";
 const AUTHORIZED = new Set(["transformative_use", "download_authorized", "republish_authorized"]);
 let myUserId = "";
 
@@ -61,6 +64,7 @@ async function main() {
 
   fs.mkdirSync(FOOTAGE_DIR, { recursive: true });
   log(`Saving footage to ${FOOTAGE_DIR}`);
+  startHeartbeat(sb, userId);
 
   // A previous run that crashed mid-download leaves clips stuck in 'downloading' (only ours).
   const { data: stale } = await sb
@@ -92,6 +96,7 @@ async function main() {
       log(`⚠ Couldn't check the queue: ${err instanceof Error ? err.message : err}`);
     }
     if (!job) {
+      setActivity("Idle");
       let didMedia = false;
       try {
         didMedia = await runMediaTask();
@@ -146,6 +151,7 @@ async function processJob(sb: SupabaseClient, job: Job) {
   if (!AUTHORIZED.has(job.rights_status)) return fail("Not downloadable — no permission and not marked for transformative use.");
 
   log(`↓ ${label}`);
+  setActivity(`Downloading ${job.title.slice(0, 50)}`);
   const dir = path.join(FOOTAGE_DIR, job.platform);
   fs.mkdirSync(dir, { recursive: true });
   const base = `${job.platform}_${job.external_clip_id.replace(/[^\w-]/g, "_")}`;
@@ -208,6 +214,32 @@ async function processJob(sb: SupabaseClient, job: Job) {
     .update({ download_status: "downloaded", download_error: null, ...(advance ? { pipeline_status: "downloaded" } : {}) })
     .eq("id", job.id);
   log(`✔ ${label} → ${path.relative(FOOTAGE_DIR, file)} (${(size / 1_048_576).toFixed(1)} MB${meta.resolution ? `, ${meta.resolution}` : ""})`);
+}
+
+/**
+ * Tells the web app this helper is online (and what it's doing), so nobody has
+ * to look at a console window. Only this person's own row is written.
+ */
+function startHeartbeat(sb: SupabaseClient, userId: string) {
+  let warned = false;
+  let lastBeat = 0;
+  const beat = async () => {
+    lastBeat = Date.now();
+    const { error } = await sb.from("helper_status").upsert(
+      { user_id: userId, hostname: os.hostname(), version: HELPER_VERSION, activity: getActivity(), last_seen: new Date().toISOString() },
+      { onConflict: "user_id" },
+    );
+    if (error && !warned) {
+      warned = true;
+      log(`⚠ Couldn't report status to the website (${error.message}). Has the editor_pro migration been run?`);
+    }
+  };
+  void beat();
+  setInterval(() => void beat(), HEARTBEAT_MS).unref();
+  // report a new activity promptly, but at most every 3 s
+  watchActivity(() => {
+    if (Date.now() - lastBeat > 3000) void beat();
+  });
 }
 
 main().catch((err) => die(err instanceof Error ? err.message : String(err)));

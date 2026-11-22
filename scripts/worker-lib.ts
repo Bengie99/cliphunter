@@ -31,6 +31,19 @@ export const env = (k: string) => process.env[k]?.trim() || "";
 export const FOOTAGE_DIR = path.resolve(env("CLIPHUNTER_FOOTAGE_DIR") || path.join(process.cwd(), "footage"));
 
 export const log = (msg: string) => console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
+
+/** What the helper is doing right now — shown in the web app ("Helper: rendering …"). */
+let activity = "Idle";
+let onActivityChange: ((a: string) => void) | null = null;
+export function setActivity(a: string) {
+  if (a === activity) return;
+  activity = a;
+  onActivityChange?.(a);
+}
+export const getActivity = () => activity;
+export function watchActivity(fn: (a: string) => void) {
+  onActivityChange = fn;
+}
 export function die(msg: string): never {
   console.error(`\n✖ ${msg}\n`);
   process.exit(1);
