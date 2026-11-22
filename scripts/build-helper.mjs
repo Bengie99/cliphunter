@@ -204,7 +204,8 @@ WINDOWS SMARTSCREEN
 step("Zipping");
 const zip = path.join(DIST, "ClipHunter Helper.zip");
 fs.rmSync(zip, { force: true });
-execFileSync("tar.exe", ["-a", "-c", "-f", zip, "-C", DIST, "ClipHunter Helper"], { stdio: "inherit" });
+// Windows' own bsdtar (zip support) — a Git Bash PATH would otherwise find GNU tar
+execFileSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe"), ["-a", "-c", "-f", zip, "-C", DIST, "ClipHunter Helper"], { stdio: "inherit" });
 console.log(`\n✔ Done: ${zip} (${(fs.statSync(zip).size / 1_048_576).toFixed(0)} MB)\n`);
 // Remotion's bundler can leave background work running that keeps Node alive (and busy) — exit explicitly.
 process.exit(0);
